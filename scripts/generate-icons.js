@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const iconsDir = join(__dirname, '..', 'public', 'icons');
-const sourceIcon = join(iconsDir, 'job-application-autofill-icon.svg');
+const sourceIcon = join(iconsDir, 'job-applymate-master.png');
 
 if (!existsSync(iconsDir)) {
   mkdirSync(iconsDir, { recursive: true });
