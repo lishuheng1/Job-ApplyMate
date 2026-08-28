@@ -1,0 +1,49 @@
+import React from 'react';
+import type { PersonalInfo } from '../shared/types.ts';
+import { buildBasicInfoItems } from './basicInfo.ts';
+import { SectionSummary } from './SectionSummary.tsx';
+
+type BasicInformationSectionProps = {
+  personal: PersonalInfo;
+  workingKey: string | null;
+  onFieldClick: (key: string, value: string) => void;
+};
+
+export function BasicInformationSection({
+  personal,
+  workingKey,
+  onFieldClick,
+}: BasicInformationSectionProps): React.JSX.Element {
+  const items = buildBasicInfoItems(personal);
+
+  return (
+    <details className="record-section" open>
+      <SectionSummary title="基本信息" count={items.length} />
+      <div className="field-list">
+        {items.map((item) => {
+          const key = `基本信息-${String(item.key)}`;
+          const valueClassName = [
+            'field-value',
+            item.empty ? 'empty-value' : '',
+            item.key === 'selfEvaluation' ? 'field-value-single-line' : '',
+          ].filter(Boolean).join(' ');
+          return (
+            <button
+              className="field-button"
+              key={String(item.key)}
+              disabled={item.empty || Boolean(workingKey)}
+              onClick={() => onFieldClick(key, item.value)}
+              title={item.empty ? '该字段未填写' : '点击写入网页当前输入框'}
+            >
+              <span className="field-label">{item.label}</span>
+              <span className={valueClassName}>
+                {item.empty ? '未填写' : item.displayValue}
+              </span>
+              {workingKey === key && <span className="field-working">写入中</span>}
+            </button>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
