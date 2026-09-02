@@ -32,4 +32,5 @@ test('npm test 使用仓库内受版本控制的 tsx 依赖，而不是 npx 临�
     packageJson.devDependencies?.tsx
   );
   assert.ok(packageLock.packages?.['node_modules/tsx'], 'package-lock.json 应锁定 node_modules/tsx');
+  assert.match(packageJson.scripts?.build || '', /vite\.content\.config\.ts/);
 });

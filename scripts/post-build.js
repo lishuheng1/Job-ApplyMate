@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, existsSync, readdirSync, cpSync } from 'fs';
+import { copyFileSync, mkdirSync, existsSync, readdirSync, cpSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -9,6 +9,16 @@ const projectRoot = join(__dirname, '..');
 const distDir = join(projectRoot, 'dist');
 
 try {
+  const contentScriptPath = join(distDir, 'content.js');
+  if (!existsSync(contentScriptPath)) {
+    throw new Error('未生成 dist/content.js');
+  }
+  const contentScript = readFileSync(contentScriptPath, 'utf8');
+  if (/^\s*import(?:[\s{*'\"])/m.test(contentScript) || /^\s*export\s/m.test(contentScript)) {
+    throw new Error('dist/content.js 包含 ESM import/export，Chrome 无法把它作为 content script 启动');
+  }
+  console.log('✓ content.js is a self-contained classic script');
+
   // 复制 manifest.json
   const manifestSrc = join(projectRoot, 'manifest.json');
   const manifestDest = join(distDir, 'manifest.json');

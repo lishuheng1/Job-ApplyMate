@@ -14,13 +14,12 @@ export default defineConfig({
         sidepanel: resolve(__dirname, 'src/sidepanel/index.html'),
         applicationRecords: resolve(__dirname, 'src/application-records/index.html'),
         offscreen: resolve(__dirname, 'src/offscreen/index.html'),
-        content: resolve(__dirname, 'src/content/index.ts'),
         background: resolve(__dirname, 'src/background/index.ts'),
       },
       output: {
         entryFileNames: (chunkInfo) => {
-          // background 和 content 输出为独立的 JS 文件
-          if (chunkInfo.name === 'background' || chunkInfo.name === 'content') {
+          // background 输出为固定文件名；content 由独立的 IIFE 构建生成
+          if (chunkInfo.name === 'background') {
             return '[name].js';
           }
           return 'assets/[name]-[hash].js';
