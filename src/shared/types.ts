@@ -310,7 +310,7 @@ export type Message =
   | { type: 'GET_USER_PROFILE'; payload?: null }
   | { type: 'SAVE_USER_PROFILE'; payload: UserProfile }
   | { type: 'PARSE_RESUME'; payload: { file: string; fileType: string; fileName: string; rawText?: string } }
-  | { type: 'FILL_FORM'; payload?: null }
+  | { type: 'FILL_FORM'; payload?: { reusePreview?: boolean } | null }
   | { type: 'PREVIEW_FILL'; payload?: null }
   | { type: 'UNDO_LAST_FILL'; payload?: null }
   | { type: 'PING_CONTENT'; payload?: null }

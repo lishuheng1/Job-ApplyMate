@@ -41,10 +41,15 @@ export async function ensureContentScriptForTab(
     }
 
     const frameIds = await getFrameIds(tabId);
-    const disconnectedFrameIds: number[] = [];
-    for (const frameId of frameIds) {
-      if (!(await isContentReady(tabId, frameId))) disconnectedFrameIds.push(frameId);
-    }
+    // 招聘页面经常包含多个 iframe。并行握手，避免每个 frame 的消息往返时间累加。
+    const readiness = await Promise.all(frameIds.map(async frameId => ({
+      frameId,
+      ready: await isContentReady(tabId, frameId),
+    })));
+    const disconnectedFrameIds = readiness
+      .filter(result => !result.ready)
+      .map(result => result.frameId);
+    const mainFrameWasReady = readiness.some(result => result.frameId === 0 && result.ready);
 
     if (disconnectedFrameIds.length === 0) {
       return { success: true, data: { ready: true } };
@@ -63,8 +68,13 @@ export async function ensureContentScriptForTab(
       }
     }))).filter((frameId): frameId is number => frameId !== null);
 
-    if (!injectedFrameIds.includes(0)) {
+    if (!mainFrameWasReady && !injectedFrameIds.includes(0)) {
       return { success: false, error: '页面脚本未能启动。请刷新招聘页面后再试。' };
+    }
+
+    // 主 frame 原本已连接时，无需因为某个无关 iframe 的补注入再次等待主 frame。
+    if (mainFrameWasReady) {
+      return { success: true, data: { ready: true } };
     }
 
     for (const delay of [100, 200, 350]) {

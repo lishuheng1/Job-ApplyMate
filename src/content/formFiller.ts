@@ -148,16 +148,18 @@ export class FormFiller {
     return restored;
   }
   // 字节等网申页面常见模式：经历条目需要先点击“添加”才会出现空白行
-  async prepareDynamicSections(profile: UserProfile, section: FillSection = 'all'): Promise<void> {
+  async prepareDynamicSections(profile: UserProfile, section: FillSection = 'all'): Promise<boolean> {
+    let changed = false;
     if (section === 'all' || section === 'education') {
-      await this.ensureEducationRows(profile.education.length);
+      changed = await this.ensureEducationRows(profile.education.length) || changed;
     }
     if (section === 'all' || section === 'experience') {
-      await this.ensureExperienceRows(profile.experience.length);
+      changed = await this.ensureExperienceRows(profile.experience.length) || changed;
     }
     if (section === 'all' || section === 'projects') {
-      await this.ensureProjectRows(profile.projects.length);
+      changed = await this.ensureProjectRows(profile.projects.length) || changed;
     }
+    return changed;
   }
 
   async fillElementValues(
@@ -398,39 +400,45 @@ export class FormFiller {
     return null;
   }
 
-  private async ensureEducationRows(targetCount: number): Promise<void> {
-    if (targetCount <= 1) return;
+  private async ensureEducationRows(targetCount: number): Promise<boolean> {
+    if (targetCount <= 1) return false;
 
-    await this.ensureRows({
+    return this.ensureRows({
       moduleKeyword: '教育经历',
       rowFieldName: ['school', 'school_name', 'university'],
       targetCount,
     });
   }
 
-  private async ensureExperienceRows(targetCount: number): Promise<void> {
-    if (targetCount === 0) return;
+  private async ensureExperienceRows(targetCount: number): Promise<boolean> {
+    if (targetCount === 0) return false;
+    let changed = false;
 
     const internshipModule = this.findModule('实习经历');
     const noExperienceCheckbox = internshipModule
       ?.querySelector<HTMLInputElement>('input[type="checkbox"]');
-    const moduleText = (internshipModule?.textContent || '').replace(/\s+/g, ' ');
+    const noExperienceSelected = noExperienceCheckbox?.checked
+      || noExperienceCheckbox?.getAttribute('aria-checked') === 'true';
 
-    if (noExperienceCheckbox?.checked || moduleText.includes('没有实习经历')) {
-      noExperienceCheckbox?.click();
-      await this.waitFor(() => !noExperienceCheckbox?.checked, 600);
+    if (noExperienceCheckbox && noExperienceSelected) {
+      noExperienceCheckbox.click();
+      changed = true;
+      await this.waitFor(
+        () => !noExperienceCheckbox.checked && noExperienceCheckbox.getAttribute('aria-checked') !== 'true',
+        600,
+      );
     }
 
-    await this.ensureRows({
+    return await this.ensureRows({
       moduleKeyword: '实习经历',
       rowFieldName: ['company', 'company_name', 'employer'],
       targetCount,
-    });
+    }) || changed;
   }
 
-  private async ensureProjectRows(targetCount: number): Promise<void> {
-    if (targetCount <= 1) return;
-    await this.ensureRows({
+  private async ensureProjectRows(targetCount: number): Promise<boolean> {
+    if (targetCount <= 1) return false;
+    return this.ensureRows({
       moduleKeyword: '项目经历',
       rowFieldName: ['name', 'project_name', 'projectName'],
       targetCount,
@@ -441,20 +449,23 @@ export class FormFiller {
     moduleKeyword: string;
     rowFieldName: string | string[];
     targetCount: number;
-  }): Promise<void> {
+  }): Promise<boolean> {
+    let changed = false;
     for (let attempts = 0; attempts < options.targetCount + 3; attempts++) {
       const currentCount = this.countFieldsInModule(options.moduleKeyword, options.rowFieldName);
-      if (currentCount >= options.targetCount) return;
+      if (currentCount >= options.targetCount) return changed;
 
       const addButton = this.findAddButton(options.moduleKeyword);
-      if (!addButton) return;
+      if (!addButton) return changed;
 
       addButton.click();
+      changed = true;
       await this.waitFor(
         () => this.countFieldsInModule(options.moduleKeyword, options.rowFieldName) > currentCount,
         1200,
       );
     }
+    return changed;
   }
 
   private findModule(keyword: string): HTMLElement | null {

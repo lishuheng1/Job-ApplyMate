@@ -6,6 +6,17 @@ import { buildSidepanelUrl } from '../sidepanel/navigation';
 
 const APPLICATION_RECORDS_PAGE = 'src/application-records/index.html';
 
+interface TabMessageSession {
+  ready?: boolean;
+  frameIds?: number[];
+  fillFrameIds?: number[];
+}
+
+interface FillPreviewResponse {
+  items: FillPreviewItem[];
+  detectedCount?: number;
+}
+
 function getRuntimeUrl(path: string): string {
   return typeof chrome !== 'undefined' && chrome.runtime?.getURL
     ? chrome.runtime.getURL(path)
@@ -106,9 +117,11 @@ function App() {
         throw new Error('No active tab');
       }
 
-      const preview = await sendMessageToActiveTab<{ items: FillPreviewItem[] }>(tab.id, {
+      // 预览与正式填写共享一次页面握手和 frame 列表。
+      const messageSession: TabMessageSession = {};
+      const preview = await sendMessageToActiveTab<FillPreviewResponse>(tab.id, {
         type: 'PREVIEW_FILL',
-      });
+      }, messageSession);
       if (preview.success && preview.data?.items?.length) {
         const lines = preview.data.items.slice(0, 12)
           .map(item => `${item.label}：${item.value}`);
@@ -122,8 +135,9 @@ function App() {
       }
 
       const response = await sendMessageToActiveTab(tab.id, {
-        type: 'FILL_FORM'
-      });
+        type: 'FILL_FORM',
+        payload: { reusePreview: true },
+      }, messageSession);
 
       if (response.success) {
         alert('表单填充成功！');
@@ -283,16 +297,21 @@ function App() {
   const sendMessageToActiveTab = async <T,>(
     tabId: number,
     message: Message,
+    session?: TabMessageSession,
   ): Promise<MessageResponse<T>> => {
+    const activeSession = session || {};
     const ensurePageReady = async (): Promise<MessageResponse<{ ready: boolean }>> =>
       MessageService.sendMessage<{ ready: boolean }>({
         type: 'ENSURE_CONTENT_SCRIPT',
         payload: { tabId },
       });
 
-    const readiness = await ensurePageReady();
-    if (!readiness.success) {
-      return { success: false, error: readiness.error || '当前页面未能准备就绪' };
+    if (!activeSession.ready) {
+      const readiness = await ensurePageReady();
+      if (!readiness.success) {
+        return { success: false, error: readiness.error || '当前页面未能准备就绪' };
+      }
+      activeSession.ready = true;
     }
 
     const frameAwareTypes = new Set(['DETECT_FIELDS', 'PREVIEW_FILL', 'FILL_FORM', 'START_AI_PAGE_FILL', 'UNDO_LAST_FILL']);
@@ -301,21 +320,36 @@ function App() {
         return MessageService.sendMessageToTab<T>(tabId, message, { frameId: 0 });
       }
 
-      const frames = (await chrome.webNavigation.getAllFrames({ tabId }).catch(() => null)) || [];
-      const frameIds = frames.length > 0 ? frames.map(frame => frame.frameId) : [0];
-      const responses = await Promise.all(frameIds.map(frameId =>
-        MessageService.sendMessageToTab<any>(tabId, message, { frameId }),
-      ));
-      const successes = responses.filter(response => response.success);
-      if (successes.length === 0) return responses[0] as MessageResponse<T>;
+      if (!activeSession.frameIds) {
+        const frames = (await chrome.webNavigation.getAllFrames({ tabId }).catch(() => null)) || [];
+        activeSession.frameIds = frames.length > 0
+          ? [...new Set(frames.map(frame => frame.frameId))]
+          : [0];
+      }
+      const frameIds = message.type === 'FILL_FORM' && activeSession.fillFrameIds?.length
+        ? activeSession.fillFrameIds
+        : activeSession.frameIds;
+      const frameResponses = await Promise.all(frameIds.map(async frameId => ({
+        frameId,
+        response: await MessageService.sendMessageToTab<any>(tabId, message, { frameId }),
+      })));
+      const successes = frameResponses.filter(item => item.response.success);
+      if (successes.length === 0) return frameResponses[0]?.response as MessageResponse<T>;
 
       if (message.type === 'DETECT_FIELDS' || message.type === 'UNDO_LAST_FILL') {
-        const count = successes.reduce((total, response) => total + Number(response.data?.count || 0), 0);
+        const count = successes.reduce((total, item) => total + Number(item.response.data?.count || 0), 0);
         return { success: true, data: { count } as T };
       }
       if (message.type === 'PREVIEW_FILL') {
-        const items = successes.flatMap(response => response.data?.items || []);
-        return { success: true, data: { items } as T };
+        activeSession.fillFrameIds = successes
+          .filter(item => Number(item.response.data?.detectedCount || 0) > 0 || item.response.data?.items?.length > 0)
+          .map(item => item.frameId);
+        const items = successes.flatMap(item => item.response.data?.items || []);
+        const detectedCount = successes.reduce(
+          (total, item) => total + Number(item.response.data?.detectedCount || 0),
+          0,
+        );
+        return { success: true, data: { items, detectedCount } as T };
       }
       return { success: true };
     };
@@ -325,8 +359,12 @@ function App() {
       && /Receiving end does not exist|Could not establish connection/i.test(response.error || '');
 
     if (isDisconnected()) {
+      activeSession.ready = false;
+      activeSession.frameIds = undefined;
+      activeSession.fillFrameIds = undefined;
       const reconnect = await ensurePageReady();
       if (reconnect.success) {
+        activeSession.ready = true;
         response = await sendOnce();
       }
     }

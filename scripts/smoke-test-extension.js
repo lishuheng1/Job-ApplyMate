@@ -114,8 +114,39 @@ try {
   if (!detection?.success || Number(detection.data?.count || 0) < 2) {
     throw new Error(`真实浏览器字段检测失败：${JSON.stringify(detection)}`);
   }
+  const quickFill = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
+    await chrome.storage.local.set({ userProfile: {
+      personal: { name: '测试用户', gender: '', birthDate: '', phone: '', email: 'smoke@example.com' },
+      education: [], experience: [], projects: [], customInformation: [], skills: [], certifications: []
+    } });
+    const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
+    if (!tabs[0]?.id) return { success: false, error: '测试页标签不存在' };
+    const preview = await chrome.tabs.sendMessage(tabs[0].id, { type: 'PREVIEW_FILL' });
+    const startedAt = performance.now();
+    const fill = await chrome.tabs.sendMessage(tabs[0].id, {
+      type: 'FILL_FORM',
+      payload: { reusePreview: true }
+    });
+    return {
+      success: Boolean(preview?.success && fill?.success),
+      previewCount: preview?.data?.items?.length || 0,
+      durationMs: Math.round(performance.now() - startedAt),
+      error: preview?.error || fill?.error
+    };
+  })()`);
+  if (!quickFill?.success || Number(quickFill.previewCount || 0) < 2) {
+    throw new Error(`真实浏览器快速填充失败：${JSON.stringify(quickFill)}`);
+  }
+  const filledValues = await evaluate(webSocketUrl, `({
+    name: document.querySelector('#name')?.value,
+    email: document.querySelector('#email')?.value
+  })`);
+  if (filledValues?.name !== '测试用户' || filledValues?.email !== 'smoke@example.com') {
+    throw new Error(`真实浏览器写入结果错误：${JSON.stringify(filledValues)}`);
+  }
   console.log('✓ content.js 在真实浏览器表单页中成功初始化');
   console.log(`✓ 真实浏览器识别到 ${detection.data.count} 个可填字段`);
+  console.log(`✓ 真实浏览器快速填充成功（${quickFill.durationMs}ms）`);
 } finally {
   await new Promise(resolve => {
     if (browser.exitCode !== null) {

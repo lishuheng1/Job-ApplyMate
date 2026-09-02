@@ -46,6 +46,7 @@ const visualRegionFillController = createVisualRegionFillController({
   onFillComplete: () => showFailureReview(formFiller.getLastFailures()),
 });
 let detectedFields: DetectedField[] = [];
+let fillPreviewSnapshot: { fields: DetectedField[]; createdAt: number } | null = null;
 let lastFocusedControl:
   | HTMLInputElement
   | HTMLTextAreaElement
@@ -142,8 +143,8 @@ function initializeDetection() {
 }
 
 // 处理填充按钮点击
-async function handleFillButtonClick() {
-  await fillSection('all');
+async function handleFillButtonClick(reusePreview = false) {
+  await fillSection('all', { reusePreview });
 }
 
 async function handleAIPageFill() {
@@ -234,7 +235,10 @@ async function handleAIPageFill() {
   }
 }
 
-async function fillSection(section: FillSection) {
+async function fillSection(
+  section: FillSection,
+  options: { reusePreview?: boolean } = {},
+) {
   try {
     // 获取用户资料
     const response = await sendRuntimeMessage<UserProfile>({
@@ -246,9 +250,17 @@ async function fillSection(section: FillSection) {
       return;
     }
 
-    // 先补足需要点击“添加”才会出现的动态经历行，再重新检测字段
-    await formFiller.prepareDynamicSections(response.data, section);
-    detectedFields = formDetector.detectFields();
+    // 预览刚刚完成且页面结构没有变化时，直接复用预览字段，避免再次扫描整页。
+    const dynamicSectionsChanged = await formFiller.prepareDynamicSections(response.data, section);
+    const reusablePreview = options.reusePreview
+      && !dynamicSectionsChanged
+      && fillPreviewSnapshot
+      && Date.now() - fillPreviewSnapshot.createdAt < 30_000
+      && fillPreviewSnapshot.fields.every(field => field.element.isConnected);
+    detectedFields = reusablePreview
+      ? fillPreviewSnapshot!.fields
+      : formDetector.detectFields();
+    fillPreviewSnapshot = null;
 
     // 网站字段学习结果不依赖本次识别是否成功：即使规则和 AI 都不认识该字段，
     // 只要它与用户上次纠正的控件签名一致，就直接优先尝试填写。
@@ -263,9 +275,6 @@ async function fillSection(section: FillSection) {
         return value ? [{ element, value }] : [];
       });
     const learnedUnmatchedCount = await formFiller.fillElementValues(learnedUnmatchedItems);
-
-    // 尝试用 LLM 匹配低置信度字段
-    await enhanceDetectionWithLLM();
 
     const fieldsToFill = filterFieldsBySection(detectedFields, section)
       .filter(field => !getControlValue(field.element) && isLikelyApplicationControl(field.element));
@@ -628,49 +637,6 @@ function getDateRangeFillPriority(element: Element): number {
   return inputs.indexOf(element) === 1 ? 0 : 1;
 }
 
-// 使用 LLM 增强字段检测
-async function enhanceDetectionWithLLM() {
-  const unmatched = formDetector.getUnmatchedFields()
-    .filter(({ element }) => !getControlValue(element) && isLikelyApplicationControl(element));
-  if (unmatched.length === 0) return;
-
-  try {
-    const payload = {
-      fields: unmatched.map((f, i) => ({
-        index: i,
-        name: f.identifiers.name,
-        id: f.identifiers.id,
-        placeholder: f.identifiers.placeholder,
-        labelText: f.identifiers.labelText,
-        type: f.identifiers.type,
-        contextText: f.identifiers.contextText,
-      })),
-      domain: window.location.hostname,
-    };
-
-    const response = await sendRuntimeMessage({
-      type: 'MATCH_FIELDS_LLM',
-      payload,
-    });
-
-    if (response.success && response.data) {
-      const mappings = response.data as Record<string, string>;
-      for (const [indexStr, fieldType] of Object.entries(mappings)) {
-        const idx = parseInt(indexStr);
-        if (fieldType !== 'unknown' && unmatched[idx]) {
-          detectedFields.push({
-            element: unmatched[idx].element,
-            fieldType,
-            confidence: 0.75,
-          });
-        }
-      }
-    }
-  } catch (error) {
-    console.warn('LLM field matching failed:', error);
-  }
-}
-
 // 注入 AI 生成按钮到开放性问题旁
 function injectAIButtons() {
   const detector = new OpenQuestionDetector();
@@ -931,7 +897,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'FILL_FORM') {
-    handleFillButtonClick().then(() => {
+    handleFillButtonClick(Boolean(message.payload?.reusePreview)).then(() => {
       sendResponse({ success: true });
     }).catch((error) => {
       sendResponse({ success: false, error: error.message });
@@ -946,9 +912,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       detectedFields = formDetector.detectFields();
+      fillPreviewSnapshot = {
+        fields: [...detectedFields],
+        createdAt: Date.now(),
+      };
       sendResponse({
         success: true,
-        data: { items: formFiller.buildFillPreview(detectedFields, response.data) },
+        data: {
+          items: formFiller.buildFillPreview(detectedFields, response.data),
+          detectedCount: detectedFields.length,
+        },
       });
     }).catch(error => {
       sendResponse({ success: false, error: error instanceof Error ? error.message : '生成预览失败' });
