@@ -1,4 +1,4 @@
-import { FormDetector } from './formDetector';
+import { FormDetector, type UnmatchedField } from './formDetector';
 import { FormFiller, type FillFailure, type FillSection } from './formFiller';
 import { OpenQuestionDetector } from './openQuestionDetector';
 import type { PageScanField, PageScanSection } from './pageScan';
@@ -205,11 +205,11 @@ async function handleAIPageFill() {
 
     if (cancelled) return;
 
-    // AI 没有返回值的字段也属于本次未完成项，加入复盘面板供用户纠正和学习。
-    for (const field of scannedFields) {
-      if (!getControlValue(field.element)) {
-        formFiller.markUnresolvedField(field.element, field.label || field.name || '未识别字段');
-      }
+    // 只复盘真正的正式必填项；组件内部辅助输入框和无标题控件不打扰用户。
+    for (const candidate of collectUnresolvedReviewCandidates(
+      scannedFields.map(field => ({ element: field.element, preferredLabel: field.label })),
+    )) {
+      formFiller.markUnresolvedField(candidate.element, candidate.label);
     }
 
     const fileInputs = formDetector.findFileInputs();
@@ -305,12 +305,13 @@ async function fillSection(
 
     // 显示成功消息
     showSuccessMessage();
-    for (const unmatched of formDetector.getUnmatchedFields()) {
-      const element = unmatched.element;
-      const belongsToApplicationForm = isLikelyApplicationControl(element);
-      if (belongsToApplicationForm && !getControlValue(element)) {
-        formFiller.markUnresolvedField(unmatched.element);
-      }
+    for (const candidate of collectUnresolvedReviewCandidates(
+      formDetector.getUnmatchedFields().map(unmatched => ({
+        element: unmatched.element,
+        preferredLabel: getUnmatchedFieldLabel(unmatched),
+      })),
+    )) {
+      formFiller.markUnresolvedField(candidate.element, candidate.label);
     }
     showFailureReview(formFiller.getLastFailures());
 
@@ -462,6 +463,99 @@ function isLikelyApplicationControl(
   const formText = (form.textContent || '').replace(/\s+/g, ' ').slice(0, 3000);
   const controlCount = form.querySelectorAll('input:not([type="hidden"]), textarea, select').length;
   return controlCount >= 2 && applicationWords.test(`${formText} ${semanticText}`);
+}
+
+function getUnmatchedFieldLabel(unmatched: UnmatchedField): string {
+  return unmatched.identifiers.labelText || unmatched.identifiers.placeholder;
+}
+
+function collectUnresolvedReviewCandidates(
+  items: Array<{
+    element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+    preferredLabel?: string;
+  }>,
+): Array<{
+  element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+  label: string;
+}> {
+  const seenContainers = new Set<Element>();
+  const candidates: Array<{
+    element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+    label: string;
+  }> = [];
+
+  for (const item of items) {
+    const { element } = item;
+    if (!element.isConnected || element.disabled || getControlValue(element)) continue;
+    if (!isLikelyApplicationControl(element) || !isRequiredReviewControl(element)) continue;
+
+    const label = getMeaningfulReviewLabel(element, item.preferredLabel);
+    if (!label) continue;
+
+    const container = getReviewControlContainer(element);
+    if (seenContainers.has(container)) continue;
+    seenContainers.add(container);
+    candidates.push({ element, label });
+  }
+
+  return candidates;
+}
+
+function getReviewControlContainer(
+  element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+): Element {
+  if (isChoiceControl(element)) {
+    return element.closest('[role="radiogroup"], [role="group"], fieldset')
+      || element.closest('label')
+      || element.parentElement
+      || element;
+  }
+  return element.closest(
+    '[data-form-field-id], [data-form-field-name], [data-form-field-i18n-name], [class*=applyFormItem], [class*=formItem], [class*=form-item]'
+  ) || element;
+}
+
+function isRequiredReviewControl(
+  element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+): boolean {
+  if (element.required || element.getAttribute('aria-required') === 'true') return true;
+  const container = getReviewControlContainer(element);
+  if (container.getAttribute('aria-required') === 'true') return true;
+  return Boolean(container.querySelector(
+    '[aria-required="true"], .ant-form-item-required, [class*=required], [class*=isRequired]'
+  ));
+}
+
+function getMeaningfulReviewLabel(
+  element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+  preferredLabel = '',
+): string {
+  const identifiers = FieldMatcher.extractIdentifiers(element);
+  const container = getReviewControlContainer(element);
+  const rawLabels = [
+    (isChoiceControl(element) ? getChoiceQuestion(element) : ''),
+    element.getAttribute('data-form-field-i18n-name') || '',
+    container.getAttribute('data-form-field-i18n-name') || '',
+    preferredLabel,
+    identifiers.labelText,
+    element.getAttribute('aria-label') || '',
+    identifiers.placeholder,
+  ];
+
+  for (const raw of rawLabels) {
+    const label = raw
+      .replace(/^[\s*＊]+|[\s*＊：:]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/^(?:请输入|请填写|请选择|请选取)\s*/i, '')
+      .replace(/\s*[（(]?(?:必填|required)[）)]?\s*$/i, '')
+      .trim();
+    if (!label || label.length > 100) continue;
+    if (/^(?:unknown|未知|未识别字段|请输入|请填写|请选择|输入|选择|search|搜索|please\s+(?:enter|input|select|choose))$/i.test(label)) {
+      continue;
+    }
+    return label;
+  }
+  return '';
 }
 
 function findLogicalFormBlock(
@@ -742,6 +836,8 @@ function showFailureReview(failures: FillFailure[]): void {
     const remember = document.createElement('button');
     const skip = document.createElement('button');
     const feedback = document.createElement('div');
+    row.dataset.failureReviewItem = 'true';
+    label.dataset.failureReviewLabel = 'true';
     row.style.cssText = 'padding:12px;border:1px solid #d5e6e1;border-radius:12px;background:#fff;';
     label.textContent = failure.label || failure.fieldType;
     label.style.cssText = 'margin-bottom:7px;font-weight:700;color:#163b43;';

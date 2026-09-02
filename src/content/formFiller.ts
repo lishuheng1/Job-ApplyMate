@@ -71,10 +71,10 @@ export class FormFiller {
 
   markUnresolvedField(
     element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
-    fieldType = 'unknown',
+    label = '',
   ): void {
     if (this.failures.has(element)) return;
-    this.recordFailure(element, '', fieldType);
+    this.recordFailure(element, '', 'unknown', label);
   }
 
   getFieldSignature(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement): string {
@@ -350,9 +350,11 @@ export class FormFiller {
     element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
     attemptedValue: string,
     fieldType: string,
+    labelOverride = '',
   ): void {
     const root = element.getRootNode() as Document | ShadowRoot;
-    const label = (isChoiceControl(element) ? getChoiceQuestion(element) : '')
+    const label = labelOverride
+      || (isChoiceControl(element) ? getChoiceQuestion(element) : '')
       || element.getAttribute('aria-label')
       || (element.id ? root.querySelector(`label[for="${CSS.escape(element.id)}"]`)?.textContent : '')
       || element.closest('label')?.textContent

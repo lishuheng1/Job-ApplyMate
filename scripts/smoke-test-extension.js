@@ -21,7 +21,11 @@ const server = createServer((_request, response) => {
   response.end(`<!doctype html><html><head><title>Job ApplyMate smoke</title></head><body>
     <form><label for="name">姓名</label><input id="name" name="name" required>
     <label for="email">邮箱</label><input id="email" name="email" type="email" required>
-    <label for="intro">请介绍你自己</label><textarea id="intro" name="intro"></textarea></form>
+    <label for="intro">请介绍你自己</label><textarea id="intro" name="intro"></textarea>
+    <div class="form-item"><label id="custom-label">自定义必答题</label>
+      <input id="custom-primary" aria-labelledby="custom-label" aria-required="true">
+      <input id="custom-helper" placeholder="请输入" aria-required="true"></div>
+    <div class="form-item"><input id="generic-required-helper" placeholder="请输入" aria-required="true"></div></form>
   </body></html>`);
 });
 
@@ -144,9 +148,18 @@ try {
   if (filledValues?.name !== '测试用户' || filledValues?.email !== 'smoke@example.com') {
     throw new Error(`真实浏览器写入结果错误：${JSON.stringify(filledValues)}`);
   }
+  const review = await evaluate(webSocketUrl, `({
+    count: document.querySelectorAll('[data-failure-review-item="true"]').length,
+    labels: Array.from(document.querySelectorAll('[data-failure-review-label="true"]')).map(item => item.textContent),
+    title: document.querySelector('#job-applymate-failure-review strong')?.textContent || ''
+  })`);
+  if (review?.count !== 1 || review.labels?.[0] !== '自定义必答题' || !review.title.startsWith('1 项')) {
+    throw new Error(`失败复盘过滤或去重错误：${JSON.stringify(review)}`);
+  }
   console.log('✓ content.js 在真实浏览器表单页中成功初始化');
   console.log(`✓ 真实浏览器识别到 ${detection.data.count} 个可填字段`);
   console.log(`✓ 真实浏览器快速填充成功（${quickFill.durationMs}ms）`);
+  console.log('✓ 失败复盘会过滤辅助输入框，并把同一逻辑字段去重为 1 项');
 } finally {
   await new Promise(resolve => {
     if (browser.exitCode !== null) {
