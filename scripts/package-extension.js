@@ -37,20 +37,15 @@ function tryZip() {
 }
 
 function tryPowerShell() {
-  const psCommand = [
-    'Compress-Archive',
-    '-Path', `"${join(distDir, '*')}"`,
-    '-DestinationPath', `"${zipFile}"`,
-    '-Force',
-  ].join(' ');
+  const quotePowerShell = (value) => `'${value.replace(/'/g, "''")}'`;
+  const psCommand = `Compress-Archive -Path ${quotePowerShell(join(distDir, '*'))} -DestinationPath ${quotePowerShell(zipFile)} -Force`;
 
   const result = spawnSync(
-    'powershell',
+    'powershell.exe',
     ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psCommand],
     {
       cwd: projectRoot,
       stdio: 'inherit',
-      shell: true,
     }
   );
 

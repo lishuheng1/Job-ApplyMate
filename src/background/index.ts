@@ -59,6 +59,7 @@ import {
   captureVisibleRegion,
   handleVisualRegionFill,
 } from './visualRegionFill.ts';
+import { areEquivalentDates } from '../utils/dateValue.ts';
 
 // Background Service Worker 入口
 console.log('Background service worker started');
@@ -86,17 +87,46 @@ async function handleSaveLearnedFieldValue(
   if (!normalizedDomain || !entry.signature.trim() || !entry.value.trim()) {
     return { success: false, error: '学习字段信息不完整' };
   }
-  const settings = await StorageService.getSettings() || {};
+  const [settingsValue, profile] = await Promise.all([
+    StorageService.getSettings(),
+    StorageService.getUserProfile(),
+  ]);
+  const settings = settingsValue || {};
   const store = (settings.learnedFieldValues || {}) as LearnedFieldStore;
   const nextStore = updateLearnedFieldStore(store, normalizedDomain, {
     signature: entry.signature,
     label: entry.label.slice(0, 160),
     value: entry.value.slice(0, 4000),
+    profilePath: entry.profilePath || inferProfilePath(profile, entry.value),
     updatedAt: entry.updatedAt,
   });
   await StorageService.saveSettings({ ...settings, learnedFieldValues: nextStore });
   await queueAutoSync('learned-field-value');
   return { success: true };
+}
+
+function inferProfilePath(profile: UserProfile | null, expected: string): string | undefined {
+  if (!profile || !expected.trim()) return undefined;
+  const target = expected.replace(/\s+/g, ' ').trim().toLowerCase();
+  const matches: string[] = [];
+  const visit = (value: unknown, path: string): void => {
+    if (typeof value === 'string') {
+      const normalized = value.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (normalized === target || areEquivalentDates(value, expected)) matches.push(path);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, `${path}[${index}]`));
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (['fileData', 'parsedText', 'rawText', 'resume'].includes(key)) continue;
+      visit(child, path ? `${path}.${key}` : key);
+    }
+  };
+  visit(profile, '');
+  return matches.sort((left, right) => left.length - right.length)[0];
 }
 
 // 监听消息
@@ -395,6 +425,7 @@ async function handleAIFillSection(
     }
     const rawMappings = JSON.parse(jsonStr) as Record<string, unknown>;
     const validFields = new Map(payload.fields.map(field => [String(field.index), field]));
+    const allowedProfileValues = collectProfileValues(profile);
     const mappings: Record<string, string> = {};
 
     for (const [index, rawValue] of Object.entries(rawMappings)) {
@@ -404,6 +435,7 @@ async function handleAIFillSection(
       const value = rawValue.trim();
       if (!value) continue;
       if (field.options.length > 0 && !field.options.includes(value)) continue;
+      if (!isAllowedProfileValue(value, allowedProfileValues)) continue;
       mappings[index] = value;
     }
 
@@ -419,6 +451,53 @@ async function handleAIFillSection(
   } finally {
     aiFillControllers.delete(payload.requestId);
   }
+}
+
+function collectProfileValues(profile: UserProfile): string[] {
+  const values: string[] = [];
+  const visit = (value: unknown, key = ''): void => {
+    if (typeof value === 'string') {
+      if (value.trim() && key !== 'id') values.push(value.trim());
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      value.forEach(item => visit(item));
+      return;
+    }
+    for (const [childKey, child] of Object.entries(value)) {
+      if (['resume', 'fileData', 'parsedText', 'rawText'].includes(childKey)) continue;
+      visit(child, childKey);
+    }
+  };
+  visit(profile);
+  return values;
+}
+
+function isAllowedProfileValue(value: string, allowed: string[]): boolean {
+  const normalized = value.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (allowed.some(candidate => (
+    candidate.replace(/\s+/g, ' ').trim().toLowerCase() === normalized
+    || areEquivalentDates(candidate, value)
+  ))) return true;
+  const year = normalized.match(/^((?:19|20)\d{2})年?$/)?.[1];
+  const month = normalized.match(/^(0?[1-9]|1[0-2])(?:月|月份)$/)?.[1];
+  if (allowed.some(candidate => {
+    const compact = candidate.replace(/\s+/g, '').toLowerCase();
+    if (year && compact.startsWith(year)) return true;
+    if (month) {
+      const candidateMonth = compact.match(/^(?:19|20)\d{2}[./-](\d{1,2})/)?.[1];
+      if (candidateMonth && Number(candidateMonth) === Number(month)) return true;
+    }
+    if (normalized.length < 2 || normalized.length > 30 || compact.length > 30) return false;
+    const negative = (text: string) => /^[不非无未否]/.test(text);
+    return negative(compact) === negative(normalized)
+      && (compact.includes(normalized) || normalized.includes(compact));
+  })) return true;
+  const parts = value.split(/[,，、/|;；\n]+/).map(part => part.trim()).filter(Boolean);
+  return parts.length > 1 && parts.every(part => allowed.some(candidate => (
+    candidate.toLowerCase() === part.toLowerCase()
+  )));
 }
 
 function handleCancelAIFill(requestId: string): MessageResponse {
@@ -657,7 +736,7 @@ async function handleGenerateAnswer(
 
 // LLM 语义字段匹配
 async function handleMatchFieldsLLM(
-  payload: { fields: Array<{ index: number; name: string; id: string; placeholder: string; labelText: string; type: string }>; domain: string }
+  payload: { fields: Array<{ index: number; name: string; id: string; placeholder: string; labelText: string; type: string; contextText?: string }>; domain: string }
 ): Promise<MessageResponse> {
   try {
     const cacheKey = buildFieldMatchingCacheKey(payload.domain, payload.fields);

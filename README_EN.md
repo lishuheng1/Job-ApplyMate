@@ -16,9 +16,10 @@ Job ApplyMate is a Chrome and Edge extension that keeps job-application informat
 |---|---|
 | Profile management | Store personal information, education, work experience, projects, skills, certificates, and custom fields |
 | Quick Fill | Detect common recruitment-form fields and fill them from your saved profile |
+| Logical form detection | Treat radio/checkbox groups, split date controls, and repeated experience rows as complete questions instead of unrelated inputs |
 | Smart date adaptation | Adapt year, month, and date values to the format required by the website; `2020.06`, `2020.6`, and `2020-06` are treated as the same month |
 | Failure review and learning | Review fields that could not be filled, correct and remember a value, skip one item, or skip all failures for the current run |
-| AI Page Scan | Match and fill complex fields with a configured AI provider |
+| AI Page Scan | Match the page as structured form blocks and keep every education, work, or project block bound to one profile record |
 | AI Region Fill | Select a form area and use a vision-capable model to fill only the empty controls in that area |
 | Information panel | Focus a web form control and write one saved profile value at a time; rejected values are copied automatically |
 | Resume parsing | Import PDF, DOCX, Markdown, TXT, and structured JSON resumes |
@@ -83,11 +84,11 @@ Open **简历上传** (Resume Upload) in Settings and select a PDF, DOCX, Markdo
    - choose **本次不填** (Skip This Time) for one item; or
    - choose **本次全部不填** (Skip All This Time).
 
-Learned values are isolated by website and field. The next time the same field is found on the same website, Job ApplyMate tries the learned value before normal matching—even if that field is not recognized by the built-in matcher.
+Learned values are isolated by website and logical field. When a correction matches a saved profile value, Job ApplyMate remembers the profile path as well, so later profile edits can flow into the learned field instead of reusing stale text.
 
 ### 4. Use AI Page Scan
 
-Configure an AI provider in **AI 设置**, open an application page, and select **AI 扫描填充**. Job ApplyMate groups empty controls by profile section, sends their labels, context, and available options to the configured model, and writes validated results back to the page. Existing non-empty fields are not overwritten.
+Configure an AI provider in **AI 设置**, open an application page, and select **AI 扫描填充**. Job ApplyMate builds logical controls and DOM form blocks, matches the remaining page in one request, and writes only validated profile-backed values. Resume files, extracted resume text, and internal record IDs are excluded from page-scan requests. Existing non-empty fields are not overwritten.
 
 ### 5. Use AI Region Fill
 

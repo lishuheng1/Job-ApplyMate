@@ -1,6 +1,13 @@
 import type { DetectedField } from '../shared/types';
 import { FieldType } from '../shared/types';
 import { FieldMatcher } from '../utils/fieldMatcher';
+import {
+  getChoiceGroup,
+  getChoiceQuestion,
+  getControlOptions,
+  isChoiceControl,
+  isLogicalChoiceRepresentative,
+} from './controlSemantics';
 
 export interface UnmatchedField {
   element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
@@ -12,16 +19,23 @@ export class FormDetector {
   private detectedFields: DetectedField[] = [];
   private unmatchedFields: UnmatchedField[] = [];
   private observedRoots = new WeakSet<Node>();
+  private searchRoots: ParentNode[] = [document];
+  private discoveredRoots = new WeakSet<Node>();
+  private redetectTimer: number | null = null;
 
   private getSearchRoots(): ParentNode[] {
-    const roots: ParentNode[] = [document];
-    for (let index = 0; index < roots.length; index++) {
-      const root = roots[index];
-      for (const element of Array.from(root.querySelectorAll('*'))) {
-        if (element.shadowRoot && !roots.includes(element.shadowRoot)) roots.push(element.shadowRoot);
-      }
+    this.discoverShadowRoots(document);
+    return this.searchRoots;
+  }
+
+  private discoverShadowRoots(root: ParentNode): void {
+    if (this.discoveredRoots.has(root as Node)) return;
+    this.discoveredRoots.add(root as Node);
+    for (const element of Array.from(root.querySelectorAll('*'))) {
+      if (!element.shadowRoot || this.searchRoots.includes(element.shadowRoot)) continue;
+      this.searchRoots.push(element.shadowRoot);
+      this.discoverShadowRoots(element.shadowRoot);
     }
-    return roots;
   }
 
   // 检测页面中的所有表单字段
@@ -29,27 +43,12 @@ export class FormDetector {
     this.detectedFields = [];
     this.unmatchedFields = [];
 
-    // 查找所有输入元素
     const roots = this.getSearchRoots();
-    const inputs = roots.flatMap(root => Array.from(root.querySelectorAll<HTMLInputElement>(
-      'input:not([type="hidden"]):not([type="submit"]):not([type="button"])'
-    )));
-    const textareas = roots.flatMap(root => Array.from(root.querySelectorAll<HTMLTextAreaElement>('textarea')));
-    const selects = roots.flatMap(root => Array.from(root.querySelectorAll<HTMLSelectElement>('select')));
-
-    // 处理 input 元素
-    inputs.forEach((input) => {
-      this.analyzeElement(input);
-    });
-
-    // 处理 textarea 元素
-    textareas.forEach((textarea) => {
-      this.analyzeElement(textarea);
-    });
-
-    // 处理 select 元素
-    selects.forEach((select) => {
-      this.analyzeElement(select);
+    const controls = roots.flatMap(root => Array.from(root.querySelectorAll<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select')));
+    controls.forEach(control => {
+      if (isLogicalChoiceRepresentative(control)) this.analyzeElement(control);
     });
 
     console.log(`Detected ${this.detectedFields.length} form fields, ${this.unmatchedFields.length} unmatched`);
@@ -60,12 +59,22 @@ export class FormDetector {
   private analyzeElement(
     element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
   ): void {
+    if (element instanceof HTMLInputElement && [
+      'file', 'password', 'reset', 'image', 'range', 'color',
+    ].includes(element.type.toLowerCase())) return;
     const isCombobox = element.getAttribute('role') === 'combobox'
       || Boolean(element.closest('.ant-picker, .el-date-editor, .arco-picker, .semi-datepicker, [data-picker]'));
 
-    // 跳过不可见或禁用的元素
+    const visible = element.getClientRects().length > 0
+      || (isChoiceControl(element) && getChoiceGroup(element).some(choice => {
+        const label = choice.id
+          ? (choice.getRootNode() as Document | ShadowRoot)
+            .querySelector(`label[for="${CSS.escape(choice.id)}"]`)
+          : choice.closest('label');
+        return Boolean(label && (label as HTMLElement).getClientRects().length > 0);
+      }));
     if (
-      element.offsetParent === null ||
+      !visible ||
       element.disabled ||
       ('readOnly' in element && element.readOnly && !isCombobox)
     ) {
@@ -74,6 +83,11 @@ export class FormDetector {
 
     // 提取元素标识符
     const identifiers = FieldMatcher.extractIdentifiers(element);
+    if (isChoiceControl(element)) {
+      const question = getChoiceQuestion(element);
+      identifiers.labelText = question || identifiers.labelText;
+      identifiers.contextText = `${identifiers.contextText} ${question} 选项 ${getControlOptions(element).join(' / ')}`.trim();
+    }
 
     // 匹配字段类型
     const { fieldType, confidence } = FieldMatcher.matchFieldType(
@@ -113,6 +127,11 @@ export class FormDetector {
           for (const node of Array.from(mutation.addedNodes)) {
             if (node.nodeType === Node.ELEMENT_NODE) {
               const element = node as Element;
+              if (element.shadowRoot) {
+                if (!this.searchRoots.includes(element.shadowRoot)) this.searchRoots.push(element.shadowRoot);
+                this.discoverShadowRoots(element.shadowRoot);
+              }
+              this.discoverShadowRoots(element);
               if (
                 element.tagName === 'INPUT' ||
                 element.tagName === 'TEXTAREA' ||
@@ -130,9 +149,13 @@ export class FormDetector {
       }
 
       if (shouldRedetect) {
-        const fields = this.detectFields();
-        this.observeShadowRoots();
-        callback(fields);
+        if (this.redetectTimer !== null) window.clearTimeout(this.redetectTimer);
+        this.redetectTimer = window.setTimeout(() => {
+          this.redetectTimer = null;
+          const fields = this.detectFields();
+          this.observeShadowRoots();
+          callback(fields);
+        }, 80);
       }
     });
 
@@ -152,6 +175,8 @@ export class FormDetector {
       this.observer.disconnect();
       this.observer = null;
       this.observedRoots = new WeakSet<Node>();
+      if (this.redetectTimer !== null) window.clearTimeout(this.redetectTimer);
+      this.redetectTimer = null;
       console.log('Stopped observing DOM changes');
     }
   }

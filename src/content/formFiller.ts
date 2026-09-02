@@ -2,6 +2,17 @@ import type { DetectedField, FillPreviewItem, LearnedFieldValue, UserProfile } f
 import { FieldType } from '../shared/types';
 import { GENDER_OPTIONS, DEGREE_OPTIONS } from '../shared/constants';
 import { adaptDateValue, areEquivalentDates, findDateOptionIndex } from '../utils/dateValue';
+import { FieldMatcher } from '../utils/fieldMatcher';
+import {
+  getChoiceGroup,
+  getChoiceLabel,
+  getChoiceQuestion,
+  getControlOptions,
+  getLogicalControlValue,
+  doesChoiceMatch,
+  isChoiceControl,
+  normalizeComparable,
+} from './controlSemantics';
 
 export type FillSection = 'all' | 'personal' | 'education' | 'experience' | 'projects';
 
@@ -70,7 +81,14 @@ export class FormFiller {
     const container = element.closest<HTMLElement>(
       '[data-form-field-id], [data-form-field-name], [data-form-field-i18n-name], [class*=formItem], [class*=applyFormItem]'
     );
-    const source = [
+    const identifiers = FieldMatcher.extractIdentifiers(element);
+    const source = (isChoiceControl(element) ? [
+      element.type,
+      element.name,
+      getChoiceQuestion(element),
+      getControlOptions(element).join('|'),
+      identifiers.contextText,
+    ] : [
       element.name,
       element.id,
       element.getAttribute('data-form-field-name') || '',
@@ -79,14 +97,28 @@ export class FormFiller {
       container?.getAttribute('data-form-field-id') || '',
       element.getAttribute('aria-label') || '',
       element.getAttribute('placeholder') || '',
+      identifiers.labelText,
+      identifiers.contextText,
+      element instanceof HTMLSelectElement ? getControlOptions(element).join('|') : '',
       element.type || element.tagName,
-    ].map(value => value.trim().toLowerCase()).filter(Boolean).join('\u001f');
+    ]).map(value => value.trim().toLowerCase()).filter(Boolean).join('\u001f');
     let hash = 0x811c9dc5;
     for (let index = 0; index < source.length; index++) {
       hash ^= source.charCodeAt(index);
       hash = Math.imul(hash, 0x01000193);
     }
-    return `field-v1-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+    return `field-v2-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+  }
+
+  getCorrectionOptions(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement): string[] {
+    return getControlOptions(element);
+  }
+
+  getLearnedValue(entry: LearnedFieldValue | undefined, profile: UserProfile): string {
+    if (!entry) return '';
+    if (!entry.profilePath) return entry.value;
+    const resolved = readProfilePath(profile, entry.profilePath);
+    return typeof resolved === 'string' && resolved.trim() ? resolved : entry.value;
   }
 
   async undoLastFill(): Promise<number> {
@@ -167,6 +199,10 @@ export class FormFiller {
       return select.value === value || selectedText === value;
     }
 
+    if (isChoiceControl(element)) {
+      return Boolean(getLogicalControlValue(element));
+    }
+
     if (element.getAttribute('role') === 'combobox' && element.closest('.ud__select')) {
       const container = element.closest<HTMLElement>(
         '[data-form-field-id], [data-form-field-name], [data-form-field-i18n-name]'
@@ -201,7 +237,7 @@ export class FormFiller {
         const experienceIndex = this.getNextExperienceIndex(fieldType, experienceIndexes);
         const projectIndex = this.getNextProjectIndex(fieldType, projectIndexes);
         const signature = this.getFieldSignature(field.element);
-        const value = learnedValues[signature]?.value
+        const value = this.getLearnedValue(learnedValues[signature], profile)
           || this.getValueForField(fieldType, profile, educationIndex, experienceIndex, projectIndex);
         if (value !== null && value !== undefined) {
           if (await this.fillField(field.element, value)) {
@@ -295,12 +331,12 @@ export class FormFiller {
       // 字节日期范围组件会校验“开始时间不能晚于结束时间”。
       // 先写右侧较晚时间，再写左侧较早时间，避免旧值触发校验回滚。
       if (endInput && dates.end) {
-        const value = learnedValues[this.getFieldSignature(endInput)]?.value || dates.end;
+        const value = this.getLearnedValue(learnedValues[this.getFieldSignature(endInput)], profile) || dates.end;
         if (await this.fillField(endInput, value)) handledElements.add(endInput);
         else this.recordFailure(endInput, value, groupFields.find(field => field.element === endInput)?.fieldType || 'endDate');
       }
       if (startInput && dates.start) {
-        const value = learnedValues[this.getFieldSignature(startInput)]?.value || dates.start;
+        const value = this.getLearnedValue(learnedValues[this.getFieldSignature(startInput)], profile) || dates.start;
         if (await this.fillField(startInput, value)) handledElements.add(startInput);
         else this.recordFailure(startInput, value, groupFields.find(field => field.element === startInput)?.fieldType || 'startDate');
       }
@@ -314,7 +350,8 @@ export class FormFiller {
     fieldType: string,
   ): void {
     const root = element.getRootNode() as Document | ShadowRoot;
-    const label = element.getAttribute('aria-label')
+    const label = (isChoiceControl(element) ? getChoiceQuestion(element) : '')
+      || element.getAttribute('aria-label')
       || (element.id ? root.querySelector(`label[for="${CSS.escape(element.id)}"]`)?.textContent : '')
       || element.closest('label')?.textContent
       || element.getAttribute('placeholder')
@@ -381,7 +418,7 @@ export class FormFiller {
 
     if (noExperienceCheckbox?.checked || moduleText.includes('没有实习经历')) {
       noExperienceCheckbox?.click();
-      await this.wait(500);
+      await this.waitFor(() => !noExperienceCheckbox?.checked, 600);
     }
 
     await this.ensureRows({
@@ -413,7 +450,10 @@ export class FormFiller {
       if (!addButton) return;
 
       addButton.click();
-      await this.wait(700);
+      await this.waitFor(
+        () => this.countFieldsInModule(options.moduleKeyword, options.rowFieldName) > currentCount,
+        1200,
+      );
     }
   }
 
@@ -464,6 +504,30 @@ export class FormFiller {
 
   private wait(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private waitFor(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
+    if (predicate()) return Promise.resolve(true);
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = (result: boolean) => {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        window.clearTimeout(timer);
+        resolve(result);
+      };
+      const observer = new MutationObserver(() => {
+        if (predicate()) finish(true);
+      });
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'aria-expanded', 'aria-selected', 'value'],
+      });
+      const timer = window.setTimeout(() => finish(predicate()), timeoutMs);
+    });
   }
 
   private getNextEducationIndex(
@@ -698,8 +762,6 @@ export class FormFiller {
       this.fillInputField(element as HTMLInputElement | HTMLTextAreaElement, adaptedValue);
     }
 
-    // 等待一小段时间，确保事件处理完成
-    await new Promise((resolve) => setTimeout(resolve, 50));
     if (element.tagName === 'SELECT') {
       const select = element as HTMLSelectElement;
       return select.selectedIndex >= 0
@@ -724,6 +786,7 @@ export class FormFiller {
   }
 
   private readElementValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement): string {
+    if (isChoiceControl(element)) return getLogicalControlValue(element);
     if (element instanceof HTMLSelectElement) {
       return element.options[element.selectedIndex]?.text?.trim() || element.value;
     }
@@ -759,32 +822,55 @@ export class FormFiller {
   }
 
   private fillChoiceField(element: HTMLInputElement, value: string): boolean {
-    const choiceText = `${element.value} ${this.getChoiceLabel(element)}`.trim().toLowerCase();
-    const desired = value.trim().toLowerCase();
-    const truthy = /^(true|yes|1|是|同意|接受|已勾选)$/i.test(desired);
-    const matches = truthy
-      || choiceText === desired
-      || choiceText.includes(desired)
-      || (Boolean(choiceText) && desired.includes(choiceText));
-    if (!matches) return false;
-    if (!element.checked) element.click();
-    if (!element.checked) {
-      element.checked = true;
-      this.triggerEvents(element);
-    }
-    return element.checked;
-  }
+    const choices = getChoiceGroup(element);
+    const desired = normalizeComparable(value);
+    if (!desired) return false;
+    const yes = new Set(['true', 'yes', '1', '是', '同意', '接受', '已勾选']);
+    const no = new Set(['false', 'no', '0', '否', '不同意', '不接受', '未勾选']);
 
-  private getChoiceLabel(element: HTMLInputElement): string {
-    if (element.id) {
-      const root = element.getRootNode() as Document | ShadowRoot;
-      const label = root.querySelector(`label[for="${CSS.escape(element.id)}"]`)?.textContent;
-      if (label) return label.trim();
+    if (element.type === 'checkbox' && choices.length === 1 && (yes.has(desired) || no.has(desired))) {
+      const shouldCheck = yes.has(desired);
+      if (element.checked !== shouldCheck) {
+        element.click();
+        if (element.checked !== shouldCheck) {
+          element.checked = shouldCheck;
+          this.triggerEvents(element);
+        }
+      }
+      return element.checked === shouldCheck;
     }
-    return element.closest('label')?.textContent?.trim()
-      || element.parentElement?.textContent?.trim()
-      || element.getAttribute('aria-label')
-      || '';
+
+    const desiredParts = value.split(/[,，、/|;；\n]+/).map(normalizeComparable).filter(Boolean);
+    const matches = (choice: HTMLInputElement): boolean => {
+      return desiredParts.some(part => doesChoiceMatch(choice.value, getChoiceLabel(choice), part));
+    };
+    const targets = choices.filter(matches);
+    if (!targets.length) return false;
+
+    if (element.type === 'radio') {
+      const target = targets[0];
+      this.capturePreviousValue(target);
+      if (!target.checked) target.click();
+      if (!target.checked) {
+        target.checked = true;
+        this.triggerEvents(target);
+      }
+      return target.checked;
+    }
+
+    let changed = false;
+    for (const choice of choices) {
+      const shouldCheck = targets.includes(choice);
+      if (choice.checked === shouldCheck) continue;
+      this.capturePreviousValue(choice);
+      choice.click();
+      if (choice.checked !== shouldCheck) {
+        choice.checked = shouldCheck;
+        this.triggerEvents(choice);
+      }
+      changed = true;
+    }
+    return changed || targets.every(choice => choice.checked);
   }
 
   private async fillGenericCombobox(element: HTMLInputElement, value: string): Promise<boolean> {
@@ -794,16 +880,19 @@ export class FormFiller {
     trigger.scrollIntoView({ block: 'center', inline: 'nearest' });
     trigger.click();
     element.focus();
-    await this.wait(250);
     const controlledId = element.getAttribute('aria-controls') || element.getAttribute('aria-owns');
-    const controlled = controlledId ? document.getElementById(controlledId) : null;
-    const candidates = Array.from((controlled || document).querySelectorAll<HTMLElement>(
-      '[role="option"], .ant-select-item-option, .el-select-dropdown__item, .MuiAutocomplete-option, .react-select__option, .semi-select-option, .arco-select-option'
-    )).filter(option => {
-      const style = window.getComputedStyle(option);
-      const rect = option.getBoundingClientRect();
-      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
-    });
+    const collectCandidates = () => {
+      const controlled = controlledId ? document.getElementById(controlledId) : null;
+      return Array.from((controlled || document).querySelectorAll<HTMLElement>(
+        '[role="option"], .ant-select-item-option, .el-select-dropdown__item, .MuiAutocomplete-option, .react-select__option, .semi-select-option, .arco-select-option'
+      )).filter(option => {
+        const style = window.getComputedStyle(option);
+        const rect = option.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+      });
+    };
+    await this.waitFor(() => collectCandidates().length > 0, 800);
+    const candidates = collectCandidates();
     const dateIndex = findDateOptionIndex(value, candidates.map(option => (option.textContent || '').trim()));
     const normalized = value.trim().toLowerCase();
     const target = dateIndex >= 0 ? candidates[dateIndex] : candidates.find(option => {
@@ -816,9 +905,12 @@ export class FormFiller {
     }
     target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
     target.click();
-    await this.wait(200);
-    const selected = `${element.value} ${trigger.textContent || ''}`.trim().toLowerCase();
     const targetText = (target.textContent || '').trim().toLowerCase();
+    await this.waitFor(() => {
+      const selected = `${element.value} ${trigger.textContent || ''}`.trim().toLowerCase();
+      return Boolean(selected) && (selected.includes(targetText) || areEquivalentDates(selected, value));
+    }, 500);
+    const selected = `${element.value} ${trigger.textContent || ''}`.trim().toLowerCase();
     return Boolean(selected) && (selected.includes(targetText) || areEquivalentDates(selected, value));
   }
 
@@ -827,23 +919,18 @@ export class FormFiller {
     if (!selector) return false;
 
     selector.scrollIntoView({ block: 'center', inline: 'nearest' });
-    await this.wait(100);
     selector.click();
-    await this.wait(500);
-
-    const dropdowns = Array.from(
+    const visibleDropdown = () => Array.from(
       document.querySelectorAll<HTMLElement>('.ud__select__dropdown')
-    );
-    const dropdown = dropdowns
-      .filter(candidate => {
-        const style = window.getComputedStyle(candidate);
-        return (
-          !candidate.classList.contains('ud__select__dropdown-hidden') &&
-          style.display !== 'none' &&
-          style.visibility !== 'hidden'
-        );
-      })
-      .pop();
+    ).filter(candidate => {
+      const style = window.getComputedStyle(candidate);
+      return !candidate.classList.contains('ud__select__dropdown-hidden')
+        && style.display !== 'none'
+        && style.visibility !== 'hidden';
+    }).pop();
+    await this.waitFor(() => Boolean(visibleDropdown()), 900);
+
+    const dropdown = visibleDropdown();
     const options = Array.from(
       dropdown?.querySelectorAll<HTMLElement>('.ud__select__list__item') || []
     );
@@ -896,10 +983,12 @@ export class FormFiller {
       });
     }
 
-    await this.wait(250);
     const container = element.closest<HTMLElement>(
       '[data-form-field-id], [data-form-field-name], [data-form-field-i18n-name]'
     );
+    await this.waitFor(() => Boolean((
+      container?.querySelector('.ud__select__selector__selectItem')?.textContent || element.value
+    ).trim()), 600);
     const selectedText = (
       container?.querySelector('.ud__select__selector__selectItem')?.textContent || element.value
     ).trim().toLowerCase();
@@ -1079,4 +1168,14 @@ export class FormFiller {
 
     return new Blob([bytes], { type: mime });
   }
+}
+
+function readProfilePath(profile: UserProfile, path: string): unknown {
+  const segments = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
+  let current: unknown = profile;
+  for (const segment of segments) {
+    if (!current || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
 }

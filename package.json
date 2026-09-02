@@ -1,7 +1,7 @@
 {
   "name": "job-applymate",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,11 +9,11 @@
     "package:extension": "npm run build && node scripts/package-extension.js",
     "lint": "oxlint",
     "test:application-records:core": "node --experimental-strip-types --test src/shared/applicationRecords.test.ts src/content/applicationRecordMetadata.test.ts src/background/applicationRecords.test.ts",
-    "test:application-records:ui": "tsx --test src/popup/applicationRecordsEntry.test.tsx src/application-records/App.test.tsx src/options/ApplicationRecordsSection.test.tsx",
+    "test:application-records:ui": "tsx --test src/popup/applicationRecordsEntry.test.tsx src/popup/tabMessaging.test.ts src/application-records/App.test.tsx src/options/ApplicationRecordsSection.test.tsx",
     "test:application-records": "npm run test:application-records:core && npm run test:application-records:ui",
     "test:options": "tsx --test src/options/ApplicationRecordsSection.test.tsx",
     "test:sidepanel": "tsx --test src/sidepanel/basicInfo.test.ts src/sidepanel/ProfileSections.test.ts src/sidepanel/navigation.test.ts src/utils/fieldMatcher.test.ts",
-    "test": "node --experimental-strip-types --test src/shared/backup-sync.test.ts src/shared/packageScripts.test.ts src/shared/learnedFields.test.ts src/utils/resume-parse.test.ts src/utils/dateValue.test.ts src/services/llm/fieldMatchingCache.test.ts src/services/llm/visionCapabilities.test.ts src/services/llm/llm-service.test.ts src/services/llm/visualRegionFill.test.ts src/background/visualRegionFill.test.ts src/content/visualRegionFill.test.ts src/offscreen/imageCrop.test.ts src/parsers/offscreen-routing.test.ts src/content/pageScan.test.ts && npm run test:sidepanel && npm run test:application-records",
+    "test": "node --experimental-strip-types --test src/shared/backup-sync.test.ts src/shared/packageScripts.test.ts src/shared/learnedFields.test.ts src/utils/resume-parse.test.ts src/utils/dateValue.test.ts src/services/llm/fieldMatchingCache.test.ts src/services/llm/visionCapabilities.test.ts src/services/llm/llm-service.test.ts src/services/llm/visualRegionFill.test.ts src/background/visualRegionFill.test.ts src/content/visualRegionFill.test.ts src/content/controlSemantics.test.ts src/offscreen/imageCrop.test.ts src/parsers/offscreen-routing.test.ts src/content/pageScan.test.ts && npm run test:sidepanel && npm run test:application-records",
     "preview": "vite preview"
   },
   "dependencies": {

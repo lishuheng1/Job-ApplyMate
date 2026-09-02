@@ -89,13 +89,50 @@ export class FieldMatcher {
     const autocomplete = element.getAttribute('autocomplete') || '';
     const root = element.getRootNode() as Document | ShadowRoot;
     let labelText = element.id ? (root.querySelector(`label[for="${CSS.escape(element.id)}"]`)?.textContent || '') : '';
+    const labelledBy = element.getAttribute('aria-labelledby');
+    labelText ||= labelledBy
+      ? labelledBy.split(/\s+/).map(ref => root.getElementById(ref)?.textContent || '').join(' ')
+      : '';
     labelText ||= container?.querySelector('.ud-formily-item-label label, .ud-formily-item-label, label')?.textContent || '';
     labelText ||= element.closest('label')?.textContent || '';
     labelText ||= element.getAttribute('aria-label') || '';
     labelText ||= [element.getAttribute('data-form-field-i18n-name') || '', container?.getAttribute('data-form-field-i18n-name') || ''].filter(Boolean).join(' ');
+    labelText ||= getNearbyLabelText(element);
     const module = element.closest<HTMLElement>('[class*=applyFormModuleWrapper], section, fieldset, [role=group]');
     const heading = module?.querySelector('h1, h2, h3, h4, legend, [class*=title]')?.textContent || '';
-    const contextText = `${heading} ${module?.getAttribute('aria-label') || ''}`.replace(/\s+/g, ' ').trim();
-    return { name, id, placeholder, labelText, type, autocomplete, contextText };
+    const localContainer = container || element.closest<HTMLElement>(
+      '[class*=formItem], [class*=form-item], [class*=field], [role=group], fieldset',
+    );
+    const localText = String(localContainer?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+    const contextText = `${heading} ${module?.getAttribute('aria-label') || ''} ${localText}`.replace(/\s+/g, ' ').trim();
+    return {
+      name,
+      id,
+      placeholder,
+      labelText: labelText.replace(/\s+/g, ' ').trim().slice(0, 180),
+      type,
+      autocomplete,
+      contextText,
+    };
   }
+}
+
+function getNearbyLabelText(element: Element): string {
+  const usable = (candidate: Element | null): string => {
+    if (!candidate || candidate.contains(element) || candidate.querySelector('input, textarea, select')) return '';
+    const text = (candidate.textContent || '').replace(/\s+/g, ' ').trim();
+    return text.length >= 2 && text.length <= 120 && /[\p{L}\p{N}]/u.test(text) ? text : '';
+  };
+
+  const sibling = usable(element.previousElementSibling);
+  if (sibling) return sibling;
+  let current = element.parentElement;
+  for (let depth = 0; current && depth < 4; depth++, current = current.parentElement) {
+    const direct = Array.from(current.children)
+      .filter(child => !child.contains(element))
+      .map(usable)
+      .find(Boolean);
+    if (direct) return direct;
+  }
+  return '';
 }

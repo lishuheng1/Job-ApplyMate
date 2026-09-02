@@ -1,7 +1,15 @@
 import { FormDetector } from './formDetector';
 import { FormFiller, type FillFailure, type FillSection } from './formFiller';
 import { OpenQuestionDetector } from './openQuestionDetector';
-import { groupPageScanFields, type PageScanField, type PageScanSection } from './pageScan';
+import type { PageScanField, PageScanSection } from './pageScan';
+import { FieldMatcher } from '../utils/fieldMatcher';
+import {
+  getChoiceQuestion,
+  getControlOptions,
+  getLogicalControlValue,
+  isChoiceControl,
+  isLogicalChoiceRepresentative,
+} from './controlSemantics';
 import { extractApplicationPageMetadata } from './applicationRecordMetadata.ts';
 import { createVisualRegionFillController } from './visualRegionFill.ts';
 import type {
@@ -169,7 +177,8 @@ async function handleAIPageFill() {
     const learnedValues = await getLearnedFieldValues();
     const learnedFillItems = scannedFields.flatMap(field => {
       const learned = learnedValues[formFiller.getFieldSignature(field.element)];
-      return learned ? [{ element: field.element, value: learned.value }] : [];
+      const value = formFiller.getLearnedValue(learned, response.data!);
+      return value ? [{ element: field.element, value }] : [];
     });
     let filledCount = 0;
     if (learnedFillItems.length > 0) {
@@ -185,23 +194,13 @@ async function handleAIPageFill() {
       return;
     }
 
-    const groups = groupPageScanFields(scannedFields);
-    const fieldsByIndex = new Map(scannedFields.map(field => [field.index, field]));
-    for (const group of groups) {
-      if (cancelled) return;
-      const fields = group.fields
-        .map(field => fieldsByIndex.get(field.index))
-        .filter((field): field is ScannedPageField => Boolean(field));
-      if (fields.length === 0) continue;
-
-      status.update(`AI 正在扫描${getPageSectionName(group.section)}：${fields.length} 个字段...`);
-      filledCount += await fillPageScanGroup(
-        group.section,
-        fields,
-        requestId,
-        () => !cancelled,
-      );
-    }
+    status.update(`AI 正在按表单块识别 ${scannedFields.length} 个逻辑字段...`);
+    filledCount += await fillPageScanGroup(
+      'other',
+      scannedFields,
+      requestId,
+      () => !cancelled,
+    );
 
     if (cancelled) return;
 
@@ -257,10 +256,11 @@ async function fillSection(section: FillSection) {
     const learnedValues = await getLearnedFieldValues();
     const learnedUnmatchedItems = formDetector.getUnmatchedFields()
       .filter(({ element }) => section === 'all' || getElementSection(element) === section)
-      .filter(({ element }) => !getControlValue(element))
+      .filter(({ element }) => !getControlValue(element) && isLikelyApplicationControl(element))
       .flatMap(({ element }) => {
         const learned = learnedValues[formFiller.getFieldSignature(element)];
-        return learned?.value ? [{ element, value: learned.value }] : [];
+        const value = formFiller.getLearnedValue(learned, response.data!);
+        return value ? [{ element, value }] : [];
       });
     const learnedUnmatchedCount = await formFiller.fillElementValues(learnedUnmatchedItems);
 
@@ -268,7 +268,7 @@ async function fillSection(section: FillSection) {
     await enhanceDetectionWithLLM();
 
     const fieldsToFill = filterFieldsBySection(detectedFields, section)
-      .filter(field => !getControlValue(field.element));
+      .filter(field => !getControlValue(field.element) && isLikelyApplicationControl(field.element));
 
     if (fieldsToFill.length === 0 && learnedUnmatchedCount === 0 && formFiller.getLastFailures().length === 0) {
       alert('未检测到可填充的表单字段');
@@ -298,12 +298,7 @@ async function fillSection(section: FillSection) {
     showSuccessMessage();
     for (const unmatched of formDetector.getUnmatchedFields()) {
       const element = unmatched.element;
-      const belongsToApplicationForm = Boolean(
-        element.closest('form')
-        || getElementSection(element)
-        || element.required
-        || element.getAttribute('aria-required') === 'true'
-      );
+      const belongsToApplicationForm = isLikelyApplicationControl(element);
       if (belongsToApplicationForm && !getControlValue(element)) {
         formFiller.markUnresolvedField(unmatched.element);
       }
@@ -352,16 +347,29 @@ function collectPageScanFields(): ScannedPageField[] {
   }
   const elements = roots.flatMap(root => Array.from(
     root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
-      'input:not([type="hidden"]):not([type="file"]):not([type="submit"]):not([type="button"]), textarea, select, [role="combobox"]',
+      'input:not([type="hidden"]):not([type="file"]):not([type="password"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]):not([type="range"]):not([type="color"]), textarea, select',
     ),
   )).filter(element => {
-    if (element.offsetParent === null || element.disabled) return false;
+    if (!isLogicalChoiceRepresentative(element)) return false;
+    const visible = element.getClientRects().length > 0
+      || (isChoiceControl(element) && getControlOptions(element).length > 0);
+    if (!visible || element.disabled) return false;
     if ('readOnly' in element && element.readOnly && element.getAttribute('role') !== 'combobox') {
       return false;
     }
-    return !getControlValue(element);
+    return !getControlValue(element) && isLikelyApplicationControl(element);
   });
-  const rowCounters = new Map<string, number>();
+  const blockIds = new WeakMap<HTMLElement, string>();
+  const blockRows = new Map<PageScanSection, Map<HTMLElement, number>>();
+  const fieldIdentities = new Map(elements.map(element => {
+    const identifiers = FieldMatcher.extractIdentifiers(element);
+    const identity = (identifiers.labelText || identifiers.name || identifiers.placeholder)
+      .replace(/\d+/g, '#')
+      .replace(/\s+/g, '')
+      .toLowerCase();
+    return [element, identity] as const;
+  }));
+  let nextBlockId = 1;
 
   return elements.map((element, index) => {
     const container = element.closest<HTMLElement>(
@@ -375,18 +383,25 @@ function collectPageScanFields(): ScannedPageField[] {
       (element as HTMLInputElement).name ||
       ''
     ).trim();
+    const identifiers = FieldMatcher.extractIdentifiers(element);
     const label = (
+      (isChoiceControl(element) ? getChoiceQuestion(element) : '') ||
       element.getAttribute('data-form-field-i18n-name') ||
       container?.getAttribute('data-form-field-i18n-name') ||
-      container?.querySelector('label')?.textContent ||
-      element.getAttribute('aria-label') ||
-      element.getAttribute('placeholder') ||
+      identifiers.labelText ||
+      identifiers.placeholder ||
       ''
     ).trim();
-    const key = `${name}|${label}`;
-    const occurrence = rowCounters.get(key) || 0;
-    rowCounters.set(key, occurrence + 1);
     const section = toPageScanSection(getElementSection(element));
+    const block = findLogicalFormBlock(element, elements, fieldIdentities);
+    let blockId = blockIds.get(block);
+    if (!blockId) {
+      blockId = `block-${nextBlockId++}`;
+      blockIds.set(block, blockId);
+    }
+    const rows = blockRows.get(section) || new Map<HTMLElement, number>();
+    if (!blockRows.has(section)) blockRows.set(section, rows);
+    if (!rows.has(block)) rows.set(block, rows.size);
     const dateInputs = isDateRangeControl(name, label) && container
       ? Array.from(container.querySelectorAll('input:not([type="hidden"]), textarea, select'))
         .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left)
@@ -401,23 +416,70 @@ function collectPageScanFields(): ScannedPageField[] {
     return {
       element,
       index,
-      rowIndex: isDateRange ? Math.floor(occurrence / 2) : occurrence,
+      rowIndex: rows.get(block) || 0,
       section,
       name,
       label,
       type: isDateRange
         ? (datePosition === 1 ? 'date-end' : 'date-start')
-        : (element.getAttribute('role') === 'combobox' ? 'combobox' : element.tagName.toLowerCase()),
+        : isChoiceControl(element)
+          ? element.type
+          : (element.getAttribute('role') === 'combobox' ? 'combobox' : element.tagName.toLowerCase()),
       options: getKnownOptions(element, label, name),
       context,
+      blockId,
+      blockContext: `${getPageSectionName(section)}；${(block.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 500)}`,
     };
   });
 }
 
-function getControlValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement): string {
-  if (element instanceof HTMLInputElement && ['radio', 'checkbox'].includes(element.type)) {
-    return element.checked ? (element.value || 'checked') : '';
+function isLikelyApplicationControl(
+  element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+): boolean {
+  const identifiers = FieldMatcher.extractIdentifiers(element);
+  const semanticText = `${identifiers.name} ${identifiers.labelText} ${identifiers.placeholder} ${identifiers.contextText}`
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+  const applicationWords = /申请|应聘|求职|简历|个人信息|联系方式|教育|学历|学校|专业|实习|工作经历|项目经历|技能|证件|application|candidate|resume|education|employment|experience|project|skills?/i;
+  const utilityWords = /搜索|查询|验证码|订阅|登录|注册|search|captcha|newsletter|sign\s*in|log\s*in/i;
+  if (utilityWords.test(semanticText) && !applicationWords.test(semanticText)) return false;
+  if (getElementSection(element)) return true;
+  if (element.required || element.getAttribute('aria-required') === 'true') return true;
+  if (element.closest(
+    '[data-form-field-id], [data-form-field-name], [data-form-field-i18n-name], [class*=applyForm], [class*=formItem], [class*=form-item]'
+  )) return true;
+  const form = element.closest('form');
+  if (!form) return false;
+  const formText = (form.textContent || '').replace(/\s+/g, ' ').slice(0, 3000);
+  const controlCount = form.querySelectorAll('input:not([type="hidden"]), textarea, select').length;
+  return controlCount >= 2 && applicationWords.test(`${formText} ${semanticText}`);
+}
+
+function findLogicalFormBlock(
+  element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+  allElements: Array<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+  fieldIdentities: Map<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, string>,
+): HTMLElement {
+  let current: HTMLElement | null = element.parentElement;
+  let best = element.parentElement || document.body;
+  for (let depth = 0; current && current !== document.body && depth < 8; depth++, current = current.parentElement) {
+    const members = allElements.filter(candidate => current?.contains(candidate));
+    const memberCount = members.length;
+    if (memberCount > 14) break;
+    const textLength = (current.textContent || '').replace(/\s+/g, '').length;
+    const identities = members.map(candidate => fieldIdentities.get(candidate) || '').filter(Boolean);
+    const crossesRepeatedRows = memberCount >= 4 && new Set(identities).size < identities.length;
+    if (crossesRepeatedRows && best !== element.parentElement) break;
+    if (memberCount >= 2 && textLength <= 600) best = current;
+    if (current.matches('fieldset, [role="group"], [role="radiogroup"], [class*=row], [class*=entry], [class*=record]') && memberCount >= 2) {
+      best = current;
+    }
   }
+  return best;
+}
+
+function getControlValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement): string {
+  if (isChoiceControl(element)) return getLogicalControlValue(element);
   const container = element.closest<HTMLElement>(
     '[data-form-field-id], [data-form-field-name], [data-form-field-i18n-name]',
   );
@@ -530,18 +592,8 @@ function getKnownOptions(
   label: string,
   name: string,
 ): string[] {
-  if (element instanceof HTMLInputElement && ['radio', 'checkbox'].includes(element.type)) {
-    const groupName = CSS.escape(element.name || '');
-    const choices = groupName
-      ? Array.from(document.querySelectorAll<HTMLInputElement>(`input[name="${groupName}"]`))
-      : [element];
-    return choices.map(choice => {
-      const label = choice.id
-        ? document.querySelector(`label[for="${CSS.escape(choice.id)}"]`)?.textContent
-        : choice.closest('label')?.textContent;
-      return (label || choice.value || '').trim();
-    }).filter(Boolean);
-  }
+  const semanticOptions = getControlOptions(element);
+  if (semanticOptions.length > 0) return semanticOptions;
   if (element instanceof HTMLSelectElement) {
     return Array.from(element.options)
       .filter(option => !option.disabled && Boolean(option.value || option.text.trim()))
@@ -578,7 +630,8 @@ function getDateRangeFillPriority(element: Element): number {
 
 // 使用 LLM 增强字段检测
 async function enhanceDetectionWithLLM() {
-  const unmatched = formDetector.getUnmatchedFields();
+  const unmatched = formDetector.getUnmatchedFields()
+    .filter(({ element }) => !getControlValue(element) && isLikelyApplicationControl(element));
   if (unmatched.length === 0) return;
 
   try {
@@ -590,6 +643,7 @@ async function enhanceDetectionWithLLM() {
         placeholder: f.identifiers.placeholder,
         labelText: f.identifiers.labelText,
         type: f.identifiers.type,
+        contextText: f.identifiers.contextText,
       })),
       domain: window.location.hostname,
     };
@@ -714,7 +768,10 @@ function showFailureReview(failures: FillFailure[]): void {
   for (const failure of failures) {
     const row = document.createElement('div');
     const label = document.createElement('div');
-    const input = document.createElement('input');
+    const options = formFiller.getCorrectionOptions(failure.element);
+    const input = options.length > 0
+      ? document.createElement('select')
+      : document.createElement('input');
     const actions = document.createElement('div');
     const remember = document.createElement('button');
     const skip = document.createElement('button');
@@ -722,8 +779,24 @@ function showFailureReview(failures: FillFailure[]): void {
     row.style.cssText = 'padding:12px;border:1px solid #d5e6e1;border-radius:12px;background:#fff;';
     label.textContent = failure.label || failure.fieldType;
     label.style.cssText = 'margin-bottom:7px;font-weight:700;color:#163b43;';
-    input.value = failure.attemptedValue;
-    input.placeholder = '输入网站接受的值';
+    if (input instanceof HTMLSelectElement) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = '请选择网站中的选项';
+      input.appendChild(placeholder);
+      for (const optionText of options) {
+        const option = document.createElement('option');
+        option.value = optionText;
+        option.textContent = optionText;
+        input.appendChild(option);
+      }
+      input.value = options.includes(failure.attemptedValue) ? failure.attemptedValue : '';
+    } else {
+      input.value = failure.attemptedValue;
+      input.placeholder = '输入网站接受的值';
+      const sourceType = failure.element instanceof HTMLInputElement ? failure.element.type : '';
+      input.type = sourceType === 'date' || sourceType === 'month' ? sourceType : 'text';
+    }
     input.style.cssText = 'width:100%;min-height:38px;padding:8px 10px;box-sizing:border-box;border:1px solid #bfd9d3;border-radius:9px;background:#fff;color:#0b2630;outline:none;';
     actions.style.cssText = 'display:flex;gap:8px;margin-top:9px;';
     remember.type = 'button';

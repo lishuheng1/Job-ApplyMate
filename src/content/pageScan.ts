@@ -9,6 +9,8 @@ export interface PageScanField {
   type: string;
   options: string[];
   context: string;
+  blockId?: string;
+  blockContext?: string;
 }
 
 export interface PageScanFieldGroup {

@@ -89,6 +89,7 @@ export interface LearnedFieldValue {
   signature: string;
   label: string;
   value: string;
+  profilePath?: string;
   updatedAt: string;
 }
 
@@ -332,7 +333,7 @@ export type Message =
   | { type: 'APPLY_FOCUSED_FIELD'; payload: VisualRegionFillResult }
   | { type: 'GET_RESUME_DATA'; payload?: null }
   | { type: 'GENERATE_ANSWER'; payload: { questionText: string; context?: string; fieldMaxLength?: number; language?: 'zh' | 'en' } }
-  | { type: 'MATCH_FIELDS_LLM'; payload: { fields: Array<{ index: number; name: string; id: string; placeholder: string; labelText: string; type: string }>; domain: string } }
+  | { type: 'MATCH_FIELDS_LLM'; payload: { fields: Array<{ index: number; name: string; id: string; placeholder: string; labelText: string; type: string; contextText?: string }>; domain: string } }
   | {
       type: 'AI_FILL_SECTION';
       payload: {
@@ -346,6 +347,8 @@ export type Message =
           type: string;
           options: string[];
           context: string;
+          blockId?: string;
+          blockContext?: string;
         }>;
         domain: string;
       };
