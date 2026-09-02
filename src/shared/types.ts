@@ -313,6 +313,8 @@ export type Message =
   | { type: 'FILL_FORM'; payload?: null }
   | { type: 'PREVIEW_FILL'; payload?: null }
   | { type: 'UNDO_LAST_FILL'; payload?: null }
+  | { type: 'PING_CONTENT'; payload?: null }
+  | { type: 'ENSURE_CONTENT_SCRIPT'; payload: { tabId: number } }
   | { type: 'GET_LEARNED_FIELD_VALUES'; payload: { domain: string } }
   | { type: 'SAVE_LEARNED_FIELD_VALUE'; payload: { domain: string; entry: LearnedFieldValue } }
   | { type: 'GET_APPLICATION_PAGE_METADATA'; payload?: null }

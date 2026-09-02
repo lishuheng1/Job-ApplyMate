@@ -284,6 +284,17 @@ function App() {
     tabId: number,
     message: Message,
   ): Promise<MessageResponse<T>> => {
+    const ensurePageReady = async (): Promise<MessageResponse<{ ready: boolean }>> =>
+      MessageService.sendMessage<{ ready: boolean }>({
+        type: 'ENSURE_CONTENT_SCRIPT',
+        payload: { tabId },
+      });
+
+    const readiness = await ensurePageReady();
+    if (!readiness.success) {
+      return { success: false, error: readiness.error || '当前页面未能准备就绪' };
+    }
+
     const frameAwareTypes = new Set(['DETECT_FIELDS', 'PREVIEW_FILL', 'FILL_FORM', 'START_AI_PAGE_FILL', 'UNDO_LAST_FILL']);
     const sendOnce = async (): Promise<MessageResponse<T>> => {
       if (!frameAwareTypes.has(message.type)) {
@@ -314,22 +325,16 @@ function App() {
       && /Receiving end does not exist|Could not establish connection/i.test(response.error || '');
 
     if (isDisconnected()) {
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId, allFrames: true },
-          files: ['content.js'],
-        });
-        await new Promise(resolve => setTimeout(resolve, 300));
+      const reconnect = await ensurePageReady();
+      if (reconnect.success) {
         response = await sendOnce();
-      } catch (error) {
-        console.debug('Unable to reconnect page content script:', error);
       }
     }
 
     if (isDisconnected()) {
       return {
         success: false,
-        error: '当前网页未能连接到插件。请刷新招聘页面后重试；浏览器内部页面和 PDF 页面无法填写。',
+        error: '当前网页未能连接到插件。请刷新招聘页面后重试。',
       };
     }
 

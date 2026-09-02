@@ -60,6 +60,7 @@ import {
   handleVisualRegionFill,
 } from './visualRegionFill.ts';
 import { areEquivalentDates } from '../utils/dateValue.ts';
+import { ensureContentScriptForTab } from './contentScriptConnection.ts';
 
 // Background Service Worker 入口
 console.log('Background service worker started');
@@ -234,6 +235,9 @@ export async function handleMessage(
 
     case 'WRITE_FOCUSED_FIELD':
       return await handleWriteFocusedField(message.payload.tabId, message.payload.value);
+
+    case 'ENSURE_CONTENT_SCRIPT':
+      return await ensureContentScriptForTab(message.payload.tabId);
 
     case 'GET_LLM_CONFIG':
       return await handleGetLLMConfig();

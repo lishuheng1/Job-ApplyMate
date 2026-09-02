@@ -21,6 +21,36 @@ import type {
   UserProfile,
 } from '../shared/types';
 
+type ContentWindow = Window & {
+  __jobApplyMateContentReady?: boolean;
+  __jobApplyMateContentVersion?: string;
+};
+const contentWindow = window as ContentWindow;
+const contentVersion = (() => {
+  try {
+    return chrome.runtime.getManifest().version;
+  } catch {
+    return '';
+  }
+})();
+const hasValidExtensionContext = (): boolean => {
+  try {
+    return Boolean(chrome.runtime?.id);
+  } catch {
+    return false;
+  }
+};
+
+if (
+  contentWindow.__jobApplyMateContentReady
+  && contentWindow.__jobApplyMateContentVersion === contentVersion
+  && hasValidExtensionContext()
+) {
+  console.debug('Job ApplyMate content script is already ready');
+} else {
+contentWindow.__jobApplyMateContentReady = true;
+contentWindow.__jobApplyMateContentVersion = contentVersion;
+
 async function sendRuntimeMessage<T = any>(message: Message): Promise<MessageResponse<T>> {
   try {
     return await chrome.runtime.sendMessage(message) as MessageResponse<T>;
@@ -902,6 +932,11 @@ function showSuccessMessage() {
 
 // 监听来自 popup 的消息
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'PING_CONTENT') {
+    sendResponse({ success: true, data: { ready: true } });
+    return true;
+  }
+
   if (message.type === 'GET_APPLICATION_PAGE_METADATA') {
     sendResponse({
       success: true,
@@ -1017,3 +1052,4 @@ style.textContent = `
   }
 `;
 document.head.appendChild(style);
+}
