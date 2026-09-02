@@ -15,6 +15,9 @@ test('内容脚本失联时按握手流程注入并确认就绪', async () => {
         return { success: true, data: { ready: true } };
       },
     },
+    webNavigation: {
+      async getAllFrames() { return [{ frameId: 0 }]; },
+    },
     scripting: {
       async executeScript(options: unknown) { injections.push(options); },
     },
@@ -34,6 +37,7 @@ test('浏览器内部页面不会尝试注入', async () => {
   let injected = false;
   (globalThis as { chrome?: unknown }).chrome = {
     tabs: { async get() { return { id: 7, url: 'chrome://extensions/' }; } },
+    webNavigation: { async getAllFrames() { return [{ frameId: 0 }]; } },
     scripting: { async executeScript() { injected = true; } },
   };
 

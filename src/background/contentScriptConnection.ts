@@ -10,15 +10,20 @@ function isRestrictedPage(url: string): boolean {
   );
 }
 
-async function isContentReady(tabId: number): Promise<boolean> {
+async function isContentReady(tabId: number, frameId: number): Promise<boolean> {
   try {
     const response = await chrome.tabs.sendMessage(tabId, {
       type: 'PING_CONTENT',
-    } satisfies Message) as MessageResponse<{ ready?: boolean }>;
+    } satisfies Message, { frameId }) as MessageResponse<{ ready?: boolean }>;
     return response.success && response.data?.ready === true;
   } catch {
     return false;
   }
+}
+
+async function getFrameIds(tabId: number): Promise<number[]> {
+  const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
+  return [...new Set([0, ...(frames || []).map(frame => frame.frameId)])];
 }
 
 /**
@@ -35,18 +40,36 @@ export async function ensureContentScriptForTab(
       return { success: false, error: '浏览器内部页面、扩展商店和内置 PDF 页面不能填写' };
     }
 
-    if (await isContentReady(tabId)) {
+    const frameIds = await getFrameIds(tabId);
+    const disconnectedFrameIds: number[] = [];
+    for (const frameId of frameIds) {
+      if (!(await isContentReady(tabId, frameId))) disconnectedFrameIds.push(frameId);
+    }
+
+    if (disconnectedFrameIds.length === 0) {
       return { success: true, data: { ready: true } };
     }
 
-    await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      files: ['content.js'],
-    });
+    // 仅重启失联的 frame：避免在已经可用的页面或 iframe 中重复注册监听器、重复填写。
+    const injectedFrameIds = (await Promise.all(disconnectedFrameIds.map(async frameId => {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId, frameIds: [frameId] },
+          files: ['content.js'],
+        });
+        return frameId;
+      } catch {
+        return null;
+      }
+    }))).filter((frameId): frameId is number => frameId !== null);
+
+    if (!injectedFrameIds.includes(0)) {
+      return { success: false, error: '页面脚本未能启动。请刷新招聘页面后再试。' };
+    }
 
     for (const delay of [100, 200, 350]) {
       await new Promise(resolve => setTimeout(resolve, delay));
-      if (await isContentReady(tabId)) {
+      if (await isContentReady(tabId, 0)) {
         return { success: true, data: { ready: true } };
       }
     }

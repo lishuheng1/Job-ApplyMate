@@ -21,36 +21,6 @@ import type {
   UserProfile,
 } from '../shared/types';
 
-type ContentWindow = Window & {
-  __jobApplyMateContentReady?: boolean;
-  __jobApplyMateContentVersion?: string;
-};
-const contentWindow = window as ContentWindow;
-const contentVersion = (() => {
-  try {
-    return chrome.runtime.getManifest().version;
-  } catch {
-    return '';
-  }
-})();
-const hasValidExtensionContext = (): boolean => {
-  try {
-    return Boolean(chrome.runtime?.id);
-  } catch {
-    return false;
-  }
-};
-
-if (
-  contentWindow.__jobApplyMateContentReady
-  && contentWindow.__jobApplyMateContentVersion === contentVersion
-  && hasValidExtensionContext()
-) {
-  console.debug('Job ApplyMate content script is already ready');
-} else {
-contentWindow.__jobApplyMateContentReady = true;
-contentWindow.__jobApplyMateContentVersion = contentVersion;
-
 async function sendRuntimeMessage<T = any>(message: Message): Promise<MessageResponse<T>> {
   try {
     return await chrome.runtime.sendMessage(message) as MessageResponse<T>;
@@ -1052,4 +1022,3 @@ style.textContent = `
   }
 `;
 document.head.appendChild(style);
-}
