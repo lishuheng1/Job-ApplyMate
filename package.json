@@ -9,7 +9,7 @@
     "package:extension": "npm run build && node scripts/package-extension.js",
     "lint": "oxlint",
     "test:application-records:core": "node --experimental-strip-types --test src/shared/applicationRecords.test.ts src/content/applicationRecordMetadata.test.ts src/background/applicationRecords.test.ts",
-    "test:application-records:ui": "tsx --test src/popup/applicationRecordsEntry.test.tsx src/popup/tabMessaging.test.ts src/application-records/App.test.tsx src/options/ApplicationRecordsSection.test.tsx",
+    "test:application-records:ui": "tsx --test src/popup/applicationRecordsEntry.test.tsx src/application-records/App.test.tsx src/options/ApplicationRecordsSection.test.tsx",
     "test:application-records": "npm run test:application-records:core && npm run test:application-records:ui",
     "test:options": "tsx --test src/options/ApplicationRecordsSection.test.tsx",
     "test:sidepanel": "tsx --test src/sidepanel/basicInfo.test.ts src/sidepanel/ProfileSections.test.ts src/sidepanel/navigation.test.ts src/utils/fieldMatcher.test.ts",

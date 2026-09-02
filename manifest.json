@@ -14,8 +14,7 @@
     "webNavigation"
   ],
   "host_permissions": [
-    "https://*/*",
-    "http://*/*"
+    "https://*/*"
   ],
   "icons": {
     "16": "icons/icon16.png",

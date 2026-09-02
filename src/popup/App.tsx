@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { MessageService } from '../shared/message';
-import type { FillPreviewItem, UserProfile } from '../shared/types';
+import type { FillPreviewItem, Message, MessageResponse, UserProfile } from '../shared/types';
 import type { LLMConfig } from '../services/llm/types';
 import { buildSidepanelUrl } from '../sidepanel/navigation';
-import { sendMessageToActiveTab } from './tabMessaging';
 
 const APPLICATION_RECORDS_PAGE = 'src/application-records/index.html';
 
@@ -279,6 +278,62 @@ function App() {
       top,
       focused: true,
     });
+  };
+
+  const sendMessageToActiveTab = async <T,>(
+    tabId: number,
+    message: Message,
+  ): Promise<MessageResponse<T>> => {
+    const frameAwareTypes = new Set(['DETECT_FIELDS', 'PREVIEW_FILL', 'FILL_FORM', 'START_AI_PAGE_FILL', 'UNDO_LAST_FILL']);
+    const sendOnce = async (): Promise<MessageResponse<T>> => {
+      if (!frameAwareTypes.has(message.type)) {
+        return MessageService.sendMessageToTab<T>(tabId, message, { frameId: 0 });
+      }
+
+      const frames = (await chrome.webNavigation.getAllFrames({ tabId }).catch(() => null)) || [];
+      const frameIds = frames.length > 0 ? frames.map(frame => frame.frameId) : [0];
+      const responses = await Promise.all(frameIds.map(frameId =>
+        MessageService.sendMessageToTab<any>(tabId, message, { frameId }),
+      ));
+      const successes = responses.filter(response => response.success);
+      if (successes.length === 0) return responses[0] as MessageResponse<T>;
+
+      if (message.type === 'DETECT_FIELDS' || message.type === 'UNDO_LAST_FILL') {
+        const count = successes.reduce((total, response) => total + Number(response.data?.count || 0), 0);
+        return { success: true, data: { count } as T };
+      }
+      if (message.type === 'PREVIEW_FILL') {
+        const items = successes.flatMap(response => response.data?.items || []);
+        return { success: true, data: { items } as T };
+      }
+      return { success: true };
+    };
+
+    let response = await sendOnce();
+    const isDisconnected = () => !response.success
+      && /Receiving end does not exist|Could not establish connection/i.test(response.error || '');
+
+    if (isDisconnected()) {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId, allFrames: true },
+          files: ['content.js'],
+        });
+        await new Promise(resolve => setTimeout(resolve, 300));
+        response = await sendOnce();
+      } catch (error) {
+        console.debug('Unable to reconnect page content script:', error);
+      }
+    }
+
+    if (isDisconnected()) {
+      return {
+        success: false,
+        error: '当前网页未能连接到插件。请刷新招聘页面后重试；浏览器内部页面和 PDF 页面无法填写。',
+      };
+    }
+
+    return response;
   };
 
   if (loading) {
