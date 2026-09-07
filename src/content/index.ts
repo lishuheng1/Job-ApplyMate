@@ -13,6 +13,7 @@ import {
 import { extractApplicationPageMetadata } from './applicationRecordMetadata.ts';
 import { createVisualRegionFillController } from './visualRegionFill.ts';
 import { createInfoOverlayController } from './infoOverlay.ts';
+import { runProgressiveFill } from './progressiveFill.ts';
 import { resolveResumeSelection } from '../shared/resumes.ts';
 import type {
   DetectedField,
@@ -49,6 +50,7 @@ const visualRegionFillController = createVisualRegionFillController({
 });
 let detectedFields: DetectedField[] = [];
 let fillPreviewSnapshot: { fields: DetectedField[]; createdAt: number } | null = null;
+let aiPageFillRunning = false;
 let lastFocusedControl:
   | HTMLInputElement
   | HTMLTextAreaElement
@@ -174,9 +176,16 @@ async function handleFillButtonClick(reusePreview = false, resumeId?: string | n
 }
 
 async function handleAIPageFill(resumeId?: string | null) {
+  if (aiPageFillRunning) {
+    showAIRegionStatus('AI 渐进补填已经在运行中').update('AI 渐进补填已经在运行中', 'warning');
+    return;
+  }
+  aiPageFillRunning = true;
   const status = showAIRegionStatus('正在扫描整页表单...');
   const requestId = crypto.randomUUID();
   let cancelled = false;
+  let filledCount = 0;
+  let uploadedResumeCount = 0;
 
   status.setCancelHandler(async () => {
     if (cancelled) return;
@@ -200,21 +209,30 @@ async function handleAIPageFill(resumeId?: string | null) {
     await formFiller.prepareDynamicSections(response.data, 'all');
     formFiller.beginFillSession();
     detectedFields = formDetector.detectFields();
-    let scannedFields = collectPageScanFields();
+    const initiallyEmptyFields = collectPageScanFields();
     const learnedValues = await getLearnedFieldValues();
+
+    // AI 只处理本地规则无法确定的字段。姓名、邮箱、学历、经历等已识别
+    // 字段先直接填写，避免把整份资料反复发送给模型。
+    status.update('正在用本地资料快速填写已识别字段...');
+    const locallyMatchedFields = detectedFields.filter(field => (
+      !getControlValue(field.element) && isLikelyApplicationControl(field.element)
+    ));
+    await formFiller.fillForm(locallyMatchedFields, response.data, learnedValues);
+    let scannedFields = collectPageScanFields();
+    filledCount = Math.max(0, initiallyEmptyFields.length - scannedFields.length);
+
     const learnedFillItems = scannedFields.flatMap(field => {
       const learned = learnedValues[formFiller.getFieldSignature(field.element)];
       const value = formFiller.getLearnedValue(learned, response.data!);
       return value ? [{ element: field.element, value }] : [];
     });
-    let filledCount = 0;
     if (learnedFillItems.length > 0) {
       filledCount += await formFiller.fillElementValues(learnedFillItems, () => !cancelled);
       scannedFields = collectPageScanFields();
     }
     const selectedResume = resolveResumeSelection(response.data, resumeId);
     const fileInputs = formDetector.findFileInputs();
-    let uploadedResumeCount = 0;
     if (selectedResume) {
       for (const fileInput of fileInputs) {
         await formFiller.uploadResume(fileInput, selectedResume.fileData, selectedResume.fileName);
@@ -232,19 +250,26 @@ async function handleAIPageFill(resumeId?: string | null) {
       return;
     }
 
-    status.update(`AI 正在按表单块识别 ${scannedFields.length} 个逻辑字段...`);
-    filledCount += await fillPageScanGroup(
+    const aiFieldCount = scannedFields.length;
+    status.update(`AI 将逐项补填 ${aiFieldCount} 个剩余字段，已完成 ${filledCount} 项...`);
+    filledCount += await fillPageScanProgressively(
       'other',
       scannedFields,
       requestId,
       () => !cancelled,
+      ({ processedCount, filledCount: aiFilledCount, label }) => {
+        status.update(
+          `AI 补填 ${processedCount}/${aiFieldCount}：${label || '未命名字段'}；累计已填 ${filledCount + aiFilledCount} 项`,
+        );
+      },
     );
 
     if (cancelled) return;
 
     // 只复盘真正的正式必填项；组件内部辅助输入框和无标题控件不打扰用户。
+    const remainingFields = collectPageScanFields();
     for (const candidate of collectUnresolvedReviewCandidates(
-      scannedFields.map(field => ({ element: field.element, preferredLabel: field.label })),
+      remainingFields.map(field => ({ element: field.element, preferredLabel: field.label })),
     )) {
       formFiller.markUnresolvedField(candidate.element, candidate.label);
     }
@@ -257,10 +282,21 @@ async function handleAIPageFill(resumeId?: string | null) {
   } catch (error) {
     if (cancelled) return;
     console.error('AI page scan fill failed:', error);
+    for (const candidate of collectUnresolvedReviewCandidates(
+      collectPageScanFields().map(field => ({
+        element: field.element,
+        preferredLabel: field.label,
+      })),
+    )) {
+      formFiller.markUnresolvedField(candidate.element, candidate.label);
+    }
     status.update(
-      `AI 扫描填充失败：${error instanceof Error ? error.message : '未知错误'}`,
-      'error',
+      `AI 扫描已停止：${error instanceof Error ? error.message : '未知错误'}；已填写的 ${filledCount} 项会保留`,
+      filledCount > 0 || uploadedResumeCount > 0 ? 'warning' : 'error',
     );
+    showFailureReview(formFiller.getLastFailures());
+  } finally {
+    aiPageFillRunning = false;
   }
 }
 
@@ -638,46 +674,67 @@ function getPageSectionName(section: PageScanSection): string {
   }[section];
 }
 
-async function fillPageScanGroup(
+async function fillPageScanProgressively(
   section: PageScanSection,
   fields: ScannedPageField[],
   requestId: string,
   shouldContinue: () => boolean,
+  onProgress: (progress: { processedCount: number; filledCount: number; label: string }) => void,
 ): Promise<number> {
-  const response = await sendRuntimeMessage<Record<string, string>>({
-    type: 'AI_FILL_SECTION',
-    payload: {
-      requestId,
-      section,
-      domain: window.location.hostname,
-      fields: fields.map(field => ({
-        index: field.index,
-        rowIndex: field.rowIndex,
-        name: field.name,
-        label: field.label,
-        type: field.type,
-        options: field.options,
-        context: field.context,
-      })),
+  const orderedFields = [...fields]
+    .sort((a, b) => {
+      const requiredPriority = Number(!isRequiredControl(a.element)) - Number(!isRequiredControl(b.element));
+      return requiredPriority
+        || getDateRangeFillPriority(a.element) - getDateRangeFillPriority(b.element);
+    });
+  const result = await runProgressiveFill({
+    items: orderedFields,
+    shouldContinue,
+    resolveValue: async field => {
+      if (!field.element.isConnected || getControlValue(field.element)) return null;
+      const response = await sendRuntimeMessage<Record<string, string>>({
+        type: 'AI_FILL_SECTION',
+        payload: {
+          requestId,
+          section,
+          domain: window.location.hostname,
+          fields: [{
+            index: field.index,
+            rowIndex: field.rowIndex,
+            name: field.name,
+            label: field.label,
+            type: field.type,
+            options: field.options,
+            context: field.context,
+            blockId: field.blockId,
+            blockContext: field.blockContext,
+          }],
+        },
+      });
+      if (!response.success || !response.data) {
+        throw new Error(response.error || 'AI 未返回当前字段的结果');
+      }
+      return response.data[String(field.index)] || null;
     },
+    applyValue: async (field, value) => {
+      if (!field.element.isConnected || getControlValue(field.element)) return false;
+      return await formFiller.fillElementValues(
+        [{ element: field.element, value }],
+        shouldContinue,
+      ) > 0;
+    },
+    onProgress: progress => onProgress({
+      processedCount: progress.processedCount,
+      filledCount: progress.filledCount,
+      label: progress.item.label,
+    }),
   });
 
-  if (!response.success || !response.data) {
-    throw new Error(response.error || 'AI 未返回扫描结果');
-  }
+  return result.filledCount;
+}
 
-  const values = Object.entries(response.data)
-    .map(([index, value]) => {
-      const field = fields.find(item => item.index === Number(index));
-      return field ? { element: field.element, value } : null;
-    })
-    .filter((item): item is {
-      element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-      value: string;
-    } => Boolean(item))
-    .sort((a, b) => getDateRangeFillPriority(a.element) - getDateRangeFillPriority(b.element));
-
-  return formFiller.fillElementValues(values, shouldContinue);
+function isRequiredControl(element: Element): boolean {
+  return element.hasAttribute('required') || element.getAttribute('aria-required') === 'true';
 }
 
 function showAIRegionStatus(initialText: string) {
@@ -1074,15 +1131,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'START_AI_PAGE_FILL') {
-    handleAIPageFill(message.payload?.resumeId).then(() => {
-      sendResponse({ success: true });
-    }).catch((error) => {
-      sendResponse({
-        success: false,
-        error: error instanceof Error ? error.message : 'AI 扫描填充失败',
-      });
-    });
-    return true;
+    void handleAIPageFill(message.payload?.resumeId);
+    sendResponse({ success: true, data: { started: true } });
+    return false;
   }
 
   if (message.type === 'START_AI_REGION_FILL') {

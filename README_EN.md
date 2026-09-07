@@ -91,7 +91,7 @@ Learned values are isolated by website and logical field. When a correction matc
 
 ### 4. Use AI Page Scan
 
-Configure an AI provider in **AI 设置**, open an application page, choose no resume or a specific file in **本次简历**, and select **AI 扫描填充**. Job ApplyMate builds logical controls and DOM form blocks, matches the remaining page in one request, and writes only validated profile-backed values. Resume files, extracted resume text, and internal record IDs are excluded from page-scan requests. Existing non-empty fields are not overwritten.
+Configure an AI provider in **AI 设置**, open an application page, choose no resume or a specific file in **本次简历**, and select **AI 扫描填充**. Job ApplyMate first fills fields covered by local rules and learned corrections, then asks AI for each remaining field and commits every verified answer immediately. Cancelling or timing out keeps the values already written. Verified results are cached for the same site, profile, and field. Resume files, extracted resume text, and internal record IDs are excluded from page-scan requests. Existing non-empty fields are not overwritten.
 
 ### 5. Use AI Region Fill
 

@@ -39,7 +39,10 @@ import {
 } from '../services/llm/prompts.ts';
 import type { AIFillSectionPayload } from '../services/llm/prompts.ts';
 import type { LLMConfig } from '../services/llm/types.ts';
-import { buildFieldMatchingCacheKey } from '../services/llm/fieldMatchingCache.ts';
+import {
+  buildAIFillValueCacheKey,
+  buildFieldMatchingCacheKey,
+} from '../services/llm/fieldMatchingCache.ts';
 import { findBestDropdownOptionIndex } from '../utils/dropdownOption.ts';
 import {
   getLearnedFieldsForDomain,
@@ -68,6 +71,7 @@ import { createResumeVariant, getResumeLibrary } from '../shared/resumes.ts';
 console.log('Background service worker started');
 
 const aiFillControllers = new Map<string, AbortController>();
+const AI_FIELD_TIMEOUT_MS = 25_000;
 
 async function queueAutoSync(reason: string): Promise<'disabled' | 'queued'> {
   const config = await StorageService.getWebDAVConfig();
@@ -411,7 +415,10 @@ async function handleAIFillSection(
   payload: AIFillSectionPayload
 ): Promise<MessageResponse<Record<string, string>>> {
   const controller = new AbortController();
+  aiFillControllers.get(payload.requestId)?.abort();
   aiFillControllers.set(payload.requestId, controller);
+  let timedOut = false;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   try {
     const config = await StorageService.getLLMConfig();
@@ -424,8 +431,35 @@ async function handleAIFillSection(
       return { success: false, error: '请先保存个人资料' };
     }
 
+    const cacheField = payload.fields.length === 1 ? payload.fields[0] : null;
+    const cacheKey = cacheField
+      ? buildAIFillValueCacheKey(
+          payload.domain,
+          cacheField,
+          getAIFillProfileFingerprint(profile),
+        )
+      : '';
+    if (cacheKey && cacheField) {
+      const cached = (await chrome.storage.local.get(cacheKey))[cacheKey];
+      if (typeof cached === 'string') {
+        const mappings = normalizeAIFillMappings(
+          { [String(cacheField.index)]: cached },
+          payload,
+          profile,
+        );
+        if (Object.keys(mappings).length > 0) {
+          return { success: true, data: mappings };
+        }
+        await chrome.storage.local.remove(cacheKey);
+      }
+    }
+
     const llm = new LLMService(config);
     const { system, user } = buildSectionFillPrompt(payload, profile);
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, AI_FIELD_TIMEOUT_MS);
     const result = await llm.chat([
       { role: 'system', content: system },
       { role: 'user', content: user },
@@ -436,37 +470,70 @@ async function handleAIFillSection(
       jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
     }
     const rawMappings = JSON.parse(jsonStr) as Record<string, unknown>;
-    const validFields = new Map(payload.fields.map(field => [String(field.index), field]));
-    const allowedProfileValues = collectProfileValues(profile);
-    const mappings: Record<string, string> = {};
-
-    for (const [index, rawValue] of Object.entries(rawMappings)) {
-      const field = validFields.get(index);
-      if (!field || typeof rawValue !== 'string') continue;
-
-      const value = rawValue.trim();
-      if (!value || !isAllowedProfileValue(value, allowedProfileValues)) continue;
-      if (field.options.length > 0) {
-        const optionIndex = findBestDropdownOptionIndex(value, field.options);
-        if (optionIndex < 0) continue;
-        mappings[index] = field.options[optionIndex];
-      } else {
-        mappings[index] = value;
-      }
+    const mappings = normalizeAIFillMappings(rawMappings, payload, profile);
+    if (cacheKey && cacheField) {
+      const value = mappings[String(cacheField.index)];
+      if (value) await chrome.storage.local.set({ [cacheKey]: value });
     }
 
     return { success: true, data: mappings };
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      return { success: false, error: 'AI 补填已终止' };
+      return {
+        success: false,
+        error: timedOut
+          ? '当前字段的 AI 请求超过 25 秒，已停止后续请求并保留已填写内容'
+          : 'AI 补填已终止，已填写内容会保留',
+      };
     }
     return {
       success: false,
       error: error instanceof Error ? error.message : 'AI 补填失败',
     };
   } finally {
-    aiFillControllers.delete(payload.requestId);
+    if (timeoutId) clearTimeout(timeoutId);
+    if (aiFillControllers.get(payload.requestId) === controller) {
+      aiFillControllers.delete(payload.requestId);
+    }
   }
+}
+
+function normalizeAIFillMappings(
+  rawMappings: Record<string, unknown>,
+  payload: AIFillSectionPayload,
+  profile: UserProfile,
+): Record<string, string> {
+  const validFields = new Map(payload.fields.map(field => [String(field.index), field]));
+  const allowedProfileValues = collectProfileValues(profile);
+  const mappings: Record<string, string> = {};
+
+  for (const [index, rawValue] of Object.entries(rawMappings)) {
+    const field = validFields.get(index);
+    if (!field || typeof rawValue !== 'string') continue;
+
+    const value = rawValue.trim();
+    if (!value || !isAllowedProfileValue(value, allowedProfileValues)) continue;
+    if (field.options.length > 0) {
+      const optionIndex = findBestDropdownOptionIndex(value, field.options);
+      if (optionIndex < 0) continue;
+      mappings[index] = field.options[optionIndex];
+    } else {
+      mappings[index] = value;
+    }
+  }
+  return mappings;
+}
+
+function getAIFillProfileFingerprint(profile: UserProfile): string {
+  return JSON.stringify({
+    personal: profile.personal,
+    education: profile.education,
+    experience: profile.experience,
+    projects: profile.projects,
+    skills: profile.skills,
+    certifications: profile.certifications,
+    customInformation: profile.customInformation,
+  });
 }
 
 function collectProfileValues(profile: UserProfile): string[] {

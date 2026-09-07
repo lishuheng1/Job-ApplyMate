@@ -239,6 +239,43 @@ try {
   if (!skipResumeFill?.success || skippedResumeName) {
     throw new Error(`选择不上传简历时仍写入了文件：${JSON.stringify({ skipResumeFill, skippedResumeName })}`);
   }
+  await evaluate(webSocketUrl, `(() => {
+    document.querySelector('#name').value = '';
+    document.querySelector('#email').value = '';
+    document.querySelector('#degree').value = '';
+    document.querySelector('#degree').setAttribute('aria-expanded', 'false');
+    document.querySelector('#degree-list').innerHTML = '';
+    document.querySelector('#degree-list').style.display = 'none';
+  })()`);
+  const progressiveAI = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
+    const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
+    return chrome.tabs.sendMessage(tabs[0].id, {
+      type: 'START_AI_PAGE_FILL',
+      payload: { resumeId: null }
+    }, { frameId: 0 });
+  })()`);
+  const valuesKeptAfterAIStopped = await evaluate(webSocketUrl, `(async () => {
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const values = {
+        name: document.querySelector('#name')?.value,
+        email: document.querySelector('#email')?.value,
+        degree: document.querySelector('#degree')?.value
+      };
+      if (values.name && values.email && values.degree) return values;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    return {
+      name: document.querySelector('#name')?.value,
+      email: document.querySelector('#email')?.value,
+      degree: document.querySelector('#degree')?.value
+    };
+  })()`);
+  if (!progressiveAI?.success
+    || valuesKeptAfterAIStopped?.name !== '测试用户'
+    || valuesKeptAfterAIStopped?.email !== 'smoke@example.com'
+    || valuesKeptAfterAIStopped?.degree !== '大学本科') {
+    throw new Error(`AI 中止时未保留已完成结果：${JSON.stringify({ progressiveAI, valuesKeptAfterAIStopped })}`);
+  }
   const overlayOpen = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
     const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
     if (!tabs[0]?.id) return { success: false, error: '测试页标签不存在' };
@@ -324,6 +361,7 @@ try {
   console.log(`✓ 真实浏览器识别到 ${detection.data.count} 个可填字段`);
   console.log(`✓ 真实浏览器快速填充成功（${quickFill.durationMs}ms）`);
   console.log('✓ 动态下拉框会等待选项加载，并把“本科”安全匹配为“大学本科”');
+  console.log('✓ AI 服务不可用时仍会保留停止前已经完成的本地填写结果');
   console.log('✓ 可按分类选择指定简历上传，也可明确选择本次不上传');
   console.log('✓ 网页内信息浮窗固定在最高层级，可写入主页面和子框架字段，被移除后会自动恢复');
   console.log('✓ content.js 即使重复注入，悬浮窗也只有一个实例且关闭一次即可隐藏');
