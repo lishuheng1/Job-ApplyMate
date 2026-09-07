@@ -18,6 +18,7 @@ Job ApplyMate is a Chrome and Edge extension that keeps job-application informat
 | Quick Fill | Detect common recruitment-form fields and fill them from your saved profile |
 | Logical form detection | Treat radio/checkbox groups, split date controls, and repeated experience rows as complete questions instead of unrelated inputs |
 | Smart date adaptation | Adapt year, month, and date values to the format required by the website; `2020.06`, `2020.6`, and `2020-06` are treated as the same month |
+| Reliable dropdown filling | Handle common UI libraries, delayed options, searchable selects, multi-selects, and cascaders; verify the committed value to avoid positive/negative mismatches |
 | Failure review and learning | Review fields that could not be filled, correct and remember a value, skip one item, or skip all failures for the current run |
 | AI Page Scan | Match the page as structured form blocks and keep every education, work, or project block bound to one profile record |
 | AI Region Fill | Select a form area and use a vision-capable model to fill only the empty controls in that area |

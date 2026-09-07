@@ -617,15 +617,7 @@ function findLogicalFormBlock(
 }
 
 function getControlValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement): string {
-  if (isChoiceControl(element)) return getLogicalControlValue(element);
-  const container = element.closest<HTMLElement>(
-    '[data-form-field-id], [data-form-field-name], [data-form-field-i18n-name]',
-  );
-  return (
-    container?.querySelector('.ud__select__selector__selectItem')?.textContent ||
-    element.value ||
-    ''
-  ).trim();
+  return getLogicalControlValue(element);
 }
 
 function isDateRangeControl(name: string, label: string): boolean {

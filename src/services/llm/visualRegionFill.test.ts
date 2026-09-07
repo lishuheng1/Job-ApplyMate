@@ -122,6 +122,20 @@ test('过滤不存在 controlId、空值和不在 options 中的结果', () => {
   }]);
 });
 
+test('视觉补填会把资料中的同义值转换为网站实际选项', () => {
+  const payload = createPayload();
+  payload.controls[0].options = ['大学本科', '硕士研究生'];
+
+  const mappings = validateVisualRegionMappings([{
+    controlId: 'ctrl-degree',
+    fieldMeaning: '学历',
+    matchedProfilePath: 'education.0.degree',
+    value: '硕士',
+  }], payload, createProfile());
+
+  assert.equal(mappings[0]?.value, '硕士研究生');
+});
+
 test('解析模型 JSON 后返回校验前的 mappings', () => {
   const result: VisualRegionFillMappingResult = parseVisualRegionFillResponse(`{
     "mappings": [

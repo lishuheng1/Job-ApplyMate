@@ -98,6 +98,19 @@ export function getLogicalControlValue(element: FormControl): string {
     const selected = getChoiceGroup(element).filter(choice => choice.checked);
     return selected.map(choice => getChoiceLabel(choice) || choice.value).filter(Boolean).join(', ');
   }
+  if (element instanceof HTMLInputElement && element.getAttribute('role') === 'combobox') {
+    const container = element.closest<HTMLElement>(
+      '[data-form-field-id], [data-form-field-name], [data-form-field-i18n-name], .ud__select, .ant-select, .el-select, .MuiAutocomplete-root, .react-select__control, .semi-select, .arco-select, [class*="cascader" i]'
+    );
+    const displayed = Array.from(container?.querySelectorAll<HTMLElement>([
+      '.ud__select__selector__selectItem', '.ant-select-selection-item',
+      '.ant-select-selection-item-content', '.el-select__selected-item',
+      '.el-tag__content', '.MuiAutocomplete-tag .MuiChip-label',
+      '.react-select__multi-value__label', '.semi-select-selection-text',
+      '.arco-select-view-value', '[aria-selected="true"]',
+    ].join(',')) || []).map(item => normalizeText(item.textContent)).filter(Boolean);
+    return unique(displayed).join(', ') || element.value.trim();
+  }
   return element.value.trim();
 }
 

@@ -25,6 +25,9 @@ const server = createServer((request, response) => {
   response.end(`<!doctype html><html><head><title>Job ApplyMate smoke</title></head><body>
     <form><label for="name">姓名</label><input id="name" name="name" required>
     <label for="email">邮箱</label><input id="email" name="email" type="email" required>
+    <label id="degree-label" for="degree">学历</label>
+    <div class="ant-select ant-select-show-search"><input id="degree" name="degree" role="combobox" aria-labelledby="degree-label" aria-controls="degree-list" aria-expanded="false" aria-autocomplete="list" required></div>
+    <div id="degree-list" role="listbox" style="display:none;position:absolute;background:white"></div>
     <label for="resume">上传简历</label><input id="resume" name="resume" type="file" accept=".pdf">
     <label for="intro">请介绍你自己</label><textarea id="intro" name="intro"></textarea>
     <div class="form-item"><label id="custom-label">自定义必答题</label>
@@ -32,6 +35,25 @@ const server = createServer((request, response) => {
       <input id="custom-helper" placeholder="请输入" aria-required="true"></div>
     <iframe id="application-frame" src="/frame"></iframe>
     <div class="form-item"><input id="generic-required-helper" placeholder="请输入" aria-required="true"></div></form>
+    <script>
+      const degreeInput = document.querySelector('#degree');
+      const degreeList = document.querySelector('#degree-list');
+      degreeInput.addEventListener('click', () => {
+        degreeInput.setAttribute('aria-expanded', 'true');
+        degreeList.style.display = 'block';
+        setTimeout(() => {
+          degreeList.innerHTML = ['非全日制', '专科', '大学本科', '硕士'].map(value =>
+            '<div role="option" style="height:24px;width:120px" data-value="' + value + '">' + value + '</div>'
+          ).join('');
+          degreeList.querySelectorAll('[role="option"]').forEach(option => option.addEventListener('click', () => {
+            degreeInput.value = option.dataset.value;
+            option.setAttribute('aria-selected', 'true');
+            degreeInput.setAttribute('aria-expanded', 'false');
+            degreeList.style.display = 'none';
+          }));
+        }, 120);
+      });
+    </script>
   </body></html>`);
 });
 
@@ -105,8 +127,34 @@ async function sendCdpCommand(webSocketUrl, method, params) {
   return method === 'Runtime.evaluate' ? result : true;
 }
 
+async function captureRuntimeDiagnostics(webSocketUrl) {
+  const messages = [];
+  const socket = new WebSocket(webSocketUrl);
+  await new Promise((resolve, reject) => {
+    socket.addEventListener('open', resolve, { once: true });
+    socket.addEventListener('error', reject, { once: true });
+  });
+  socket.addEventListener('message', event => {
+    const message = JSON.parse(event.data);
+    if (message.method === 'Runtime.consoleAPICalled') {
+      messages.push(message.params.args.map(arg => arg.value || arg.description || '').join(' '));
+    }
+    if (message.method === 'Runtime.exceptionThrown') {
+      messages.push(message.params.exceptionDetails?.exception?.description || message.params.exceptionDetails?.text || 'exception');
+    }
+    if (message.method === 'Page.javascriptDialogOpening') {
+      messages.push(`dialog: ${message.params.message}`);
+      socket.send(JSON.stringify({ id: 93, method: 'Page.handleJavaScriptDialog', params: { accept: true } }));
+    }
+  });
+  socket.send(JSON.stringify({ id: 91, method: 'Runtime.enable', params: {} }));
+  socket.send(JSON.stringify({ id: 92, method: 'Page.enable', params: {} }));
+  return { messages, close: () => socket.close() };
+}
+
 try {
   const webSocketUrl = await waitForPageTarget();
+  const runtimeDiagnostics = await captureRuntimeDiagnostics(webSocketUrl);
   await new Promise(resolve => setTimeout(resolve, 1800));
   const initialized = await evaluate(
     webSocketUrl,
@@ -127,7 +175,7 @@ try {
     let response;
     for (const delay of [0, 150, 300, 500]) {
       if (delay) await new Promise(resolve => setTimeout(resolve, delay));
-      response = await chrome.tabs.sendMessage(tabs[0].id, { type: 'DETECT_FIELDS' });
+      response = await chrome.tabs.sendMessage(tabs[0].id, { type: 'DETECT_FIELDS' }, { frameId: 0 });
       if (Number(response?.data?.count || 0) >= 2) break;
     }
     return response || { success: false, error: '无响应' };
@@ -138,7 +186,7 @@ try {
   const quickFill = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
     await chrome.storage.local.set({ userProfile: {
       personal: { name: '测试用户', gender: '', birthDate: '', phone: '', email: 'smoke@example.com', currentAddress: '上海市' },
-      education: [], experience: [], projects: [], customInformation: [], skills: [], certifications: [],
+      education: [{ school: '', college: '', major: '', degree: '本科', educationType: '', startDate: '', endDate: '', gpa: '' }], experience: [], projects: [], customInformation: [], skills: [], certifications: [],
       resume: { fileName: '产品经理原名.pdf', fileData: 'data:application/pdf;base64,JVBERi0xLjQ=', fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z' },
       resumes: [
         { id: 'resume-product', category: '产品岗', fileName: '产品经理原名.pdf', fileData: 'data:application/pdf;base64,JVBERi0xLjQ=', fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z' },
@@ -147,15 +195,16 @@ try {
     } });
     const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
     if (!tabs[0]?.id) return { success: false, error: '测试页标签不存在' };
-    const preview = await chrome.tabs.sendMessage(tabs[0].id, { type: 'PREVIEW_FILL' });
+    const preview = await chrome.tabs.sendMessage(tabs[0].id, { type: 'PREVIEW_FILL' }, { frameId: 0 });
     const startedAt = performance.now();
     const fill = await chrome.tabs.sendMessage(tabs[0].id, {
       type: 'FILL_FORM',
       payload: { reusePreview: true, resumeId: 'resume-operations' }
-    });
+    }, { frameId: 0 });
     return {
       success: Boolean(preview?.success && fill?.success),
       previewCount: preview?.data?.items?.length || 0,
+      previewItems: preview?.data?.items || [],
       durationMs: Math.round(performance.now() - startedAt),
       error: preview?.error || fill?.error
     };
@@ -166,10 +215,16 @@ try {
   const filledValues = await evaluate(webSocketUrl, `({
     name: document.querySelector('#name')?.value,
     email: document.querySelector('#email')?.value,
-    resumeName: document.querySelector('#resume')?.files?.[0]?.name || ''
+    degree: document.querySelector('#degree')?.value,
+    degreeExpanded: document.querySelector('#degree')?.getAttribute('aria-expanded'),
+    degreeOptions: Array.from(document.querySelectorAll('#degree-list [role="option"]')).map(option => ({ text: option.textContent, selected: option.getAttribute('aria-selected') })),
+    degreeListDisplay: getComputedStyle(document.querySelector('#degree-list')).display,
+    resumeName: document.querySelector('#resume')?.files?.[0]?.name || '',
+    failureLabels: Array.from(document.querySelectorAll('[data-failure-review-label="true"]')).map(item => item.textContent)
   })`);
-  if (filledValues?.name !== '测试用户' || filledValues?.email !== 'smoke@example.com' || filledValues?.resumeName !== '运营岗位定制版.pdf') {
-    throw new Error(`真实浏览器写入结果错误：${JSON.stringify(filledValues)}`);
+  if (filledValues?.name !== '测试用户' || filledValues?.email !== 'smoke@example.com' || filledValues?.degree !== '大学本科' || filledValues?.resumeName !== '运营岗位定制版.pdf') {
+    runtimeDiagnostics.close();
+    throw new Error(`真实浏览器写入结果错误：${JSON.stringify({ quickFill, filledValues, runtimeMessages: runtimeDiagnostics.messages })}`);
   }
   await evaluate(webSocketUrl, `(() => {
     document.querySelector('#name').value = '';
@@ -178,7 +233,7 @@ try {
   })()`);
   const skipResumeFill = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
     const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
-    return chrome.tabs.sendMessage(tabs[0].id, { type: 'FILL_FORM', payload: { resumeId: null } });
+    return chrome.tabs.sendMessage(tabs[0].id, { type: 'FILL_FORM', payload: { resumeId: null } }, { frameId: 0 });
   })()`);
   const skippedResumeName = await evaluate(webSocketUrl, `document.querySelector('#resume')?.files?.[0]?.name || ''`);
   if (!skipResumeFill?.success || skippedResumeName) {
@@ -268,10 +323,12 @@ try {
   console.log('✓ content.js 在真实浏览器表单页中成功初始化');
   console.log(`✓ 真实浏览器识别到 ${detection.data.count} 个可填字段`);
   console.log(`✓ 真实浏览器快速填充成功（${quickFill.durationMs}ms）`);
+  console.log('✓ 动态下拉框会等待选项加载，并把“本科”安全匹配为“大学本科”');
   console.log('✓ 可按分类选择指定简历上传，也可明确选择本次不上传');
   console.log('✓ 网页内信息浮窗固定在最高层级，可写入主页面和子框架字段，被移除后会自动恢复');
   console.log('✓ content.js 即使重复注入，悬浮窗也只有一个实例且关闭一次即可隐藏');
   console.log('✓ 失败复盘会过滤辅助输入框，并把同一逻辑字段去重为 1 项');
+  runtimeDiagnostics.close();
 } finally {
   if (process.platform === 'win32' && browser.pid) {
     await new Promise(resolve => {

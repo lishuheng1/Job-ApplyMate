@@ -5,6 +5,10 @@ import type {
   VisualRegionFillMappingResult,
   VisualRegionFillPayload,
 } from '../../shared/types.ts';
+import {
+  findBestDropdownOptionIndex,
+  scoreDropdownOption,
+} from '../../utils/dropdownOption.ts';
 
 export function parseVisualRegionFillResponse(raw: string): VisualRegionFillMappingResult {
   const normalized = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
@@ -39,15 +43,19 @@ export function validateVisualRegionMappings(
     payload.controls.map(control => [control.controlId, control]),
   );
 
-  return mappings.filter((mapping): mapping is VisualRegionFillMapping => {
+  return mappings.flatMap((mapping): VisualRegionFillMapping[] => {
     const control = controls.get(mapping.controlId);
-    if (!control) return false;
-    if (!mapping.value.trim()) return false;
+    if (!control || !mapping.value.trim()) return [];
 
     const profileValue = getProfileValue(profile, mapping.matchedProfilePath);
-    if (typeof profileValue !== 'string' || profileValue !== mapping.value) return false;
+    if (typeof profileValue !== 'string'
+      || (profileValue !== mapping.value && scoreDropdownOption(profileValue, mapping.value) < 900)) {
+      return [];
+    }
 
-    return control.options.length === 0 || control.options.includes(mapping.value);
+    if (control.options.length === 0) return [mapping];
+    const optionIndex = findBestDropdownOptionIndex(mapping.value, control.options);
+    return optionIndex >= 0 ? [{ ...mapping, value: control.options[optionIndex] }] : [];
   });
 }
 

@@ -2,6 +2,13 @@ import type { DetectedField, FillPreviewItem, LearnedFieldValue, UserProfile } f
 import { FieldType } from '../shared/types';
 import { GENDER_OPTIONS, DEGREE_OPTIONS } from '../shared/constants';
 import { adaptDateValue, areEquivalentDates, findDateOptionIndex } from '../utils/dateValue';
+import {
+  dropdownValueMatches,
+  findBestDropdownOptionIndex,
+  normalizeDropdownText,
+  splitCascaderValue,
+  splitMultiDropdownValue,
+} from '../utils/dropdownOption';
 import { FieldMatcher } from '../utils/fieldMatcher';
 import {
   getChoiceGroup,
@@ -132,9 +139,7 @@ export class FormFiller {
         element.selectedIndex = snapshot.selectedIndex;
       } else if (element instanceof HTMLInputElement && element.getAttribute('role') === 'combobox') {
         if (snapshot.value) {
-          await (element.closest('.ud__select')
-            ? this.fillCustomSelectField(element, snapshot.value)
-            : this.fillGenericCombobox(element, snapshot.value));
+          await this.fillGenericCombobox(element, snapshot.value);
         } else {
           this.fillInputField(element, '');
         }
@@ -763,9 +768,7 @@ export class FormFiller {
     }
     if (element.getAttribute('role') === 'combobox'
       || element.closest('.ant-picker, .el-date-editor, .arco-picker, .semi-datepicker, [data-picker]')) {
-      return element.closest('.ud__select')
-        ? this.fillCustomSelectField(element as HTMLInputElement, adaptedValue)
-        : this.fillGenericCombobox(element as HTMLInputElement, adaptedValue);
+      return this.fillGenericCombobox(element as HTMLInputElement, adaptedValue);
     }
 
     // 根据元素类型进行不同的填充
@@ -777,8 +780,11 @@ export class FormFiller {
 
     if (element.tagName === 'SELECT') {
       const select = element as HTMLSelectElement;
+      const selectedOption = select.options[select.selectedIndex];
       return select.selectedIndex >= 0
-        && Boolean(select.options[select.selectedIndex])
+        && Boolean(selectedOption)
+        && (dropdownValueMatches(selectedOption.text, adaptedValue)
+          || dropdownValueMatches(selectedOption.value, adaptedValue))
         && select.checkValidity()
         && select.getAttribute('aria-invalid') !== 'true';
     }
@@ -804,12 +810,10 @@ export class FormFiller {
       return element.options[element.selectedIndex]?.text?.trim() || element.value;
     }
     if (element instanceof HTMLInputElement && element.getAttribute('role') === 'combobox') {
-      const container = element.closest<HTMLElement>(
-        '[data-form-field-id], [data-form-field-name], [data-form-field-i18n-name], .ud__select, .ant-select, .el-select, .MuiAutocomplete-root'
-      );
-      return (container?.querySelector<HTMLElement>(
-        '.ud__select__selector__selectItem, .ant-select-selection-item, .el-select__selected-item, [aria-selected="true"]'
-      )?.textContent || element.value).trim();
+      const trigger = element.closest<HTMLElement>(
+        '.ud__select__selector, [role="combobox"], .ant-select, .el-select, .MuiAutocomplete-root, .react-select__control, .semi-select, .arco-select, [class*="cascader" i]'
+      ) || element;
+      return this.readComboboxDisplayValue(element, trigger);
     }
     return element.value;
   }
@@ -888,128 +892,305 @@ export class FormFiller {
 
   private async fillGenericCombobox(element: HTMLInputElement, value: string): Promise<boolean> {
     const trigger = element.closest<HTMLElement>(
-      '[role="combobox"], .ant-select, .el-select, .MuiAutocomplete-root, .ant-picker, .el-date-editor, .arco-picker, .semi-datepicker, [data-picker]'
+      '.ud__select__selector, [role="combobox"], .ant-select, .el-select, .MuiAutocomplete-root, .react-select__control, .ant-picker, .el-date-editor, .arco-picker, .semi-datepicker, [data-picker]'
     ) || element;
-    trigger.scrollIntoView({ block: 'center', inline: 'nearest' });
-    trigger.click();
-    element.focus();
-    const controlledId = element.getAttribute('aria-controls') || element.getAttribute('aria-owns');
-    const collectCandidates = () => {
-      const controlled = controlledId ? document.getElementById(controlledId) : null;
-      return Array.from((controlled || document).querySelectorAll<HTMLElement>(
-        '[role="option"], .ant-select-item-option, .el-select-dropdown__item, .MuiAutocomplete-option, .react-select__option, .semi-select-option, .arco-select-option'
-      )).filter(option => {
-        const style = window.getComputedStyle(option);
-        const rect = option.getBoundingClientRect();
-        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
-      });
-    };
-    await this.waitFor(() => collectCandidates().length > 0, 800);
-    const candidates = collectCandidates();
-    const dateIndex = findDateOptionIndex(value, candidates.map(option => (option.textContent || '').trim()));
-    const normalized = value.trim().toLowerCase();
-    const target = dateIndex >= 0 ? candidates[dateIndex] : candidates.find(option => {
-      const text = (option.textContent || '').trim().toLowerCase();
-      return Boolean(text) && (text === normalized || text.includes(normalized) || normalized.includes(text));
-    });
-    if (!target) {
-      document.body.click();
-      return false;
+    const isMultiple = Boolean(element.getAttribute('aria-multiselectable') === 'true'
+      || trigger.getAttribute('aria-multiselectable') === 'true'
+      || trigger.closest('.ant-select-multiple, .el-select--multiple, [class*="is-multiple"], [data-multiple="true"]'));
+    const isCascader = Boolean(trigger.closest(
+      '.ant-cascader, .el-cascader, .arco-cascader, .semi-cascader, [class*="cascader" i]'
+    ));
+    const requestedValues = isMultiple
+      ? splitMultiDropdownValue(value)
+      : isCascader ? splitCascaderValue(value) : [value];
+
+    for (const requestedValue of requestedValues) {
+      if (!await this.selectComboboxOption(element, trigger, requestedValue)) return false;
     }
-    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-    target.click();
-    const targetText = (target.textContent || '').trim().toLowerCase();
-    await this.waitFor(() => {
-      const selected = `${element.value} ${trigger.textContent || ''}`.trim().toLowerCase();
-      return Boolean(selected) && (selected.includes(targetText) || areEquivalentDates(selected, value));
-    }, 500);
-    const selected = `${element.value} ${trigger.textContent || ''}`.trim().toLowerCase();
-    return Boolean(selected) && (selected.includes(targetText) || areEquivalentDates(selected, value));
+
+    const selected = this.readComboboxDisplayValue(element, trigger);
+    if (isMultiple || isCascader) {
+      return requestedValues.every(requested => (
+        dropdownValueMatches(selected, requested)
+        || normalizeDropdownText(selected).includes(normalizeDropdownText(requested))
+      ));
+    }
+    return dropdownValueMatches(selected, value)
+      || requestedValues.some(requested => dropdownValueMatches(selected, requested));
   }
 
-  private async fillCustomSelectField(element: HTMLInputElement, value: string): Promise<boolean> {
-    const selector = element.closest<HTMLElement>('.ud__select__selector');
-    if (!selector) return false;
+  private async selectComboboxOption(
+    element: HTMLInputElement,
+    trigger: HTMLElement,
+    value: string,
+  ): Promise<boolean> {
+    const visibleBeforeOpen = new Set(this.getAllVisibleDropdownOptions(element));
+    trigger.scrollIntoView({ block: 'center', inline: 'nearest' });
+    element.focus();
 
-    selector.scrollIntoView({ block: 'center', inline: 'nearest' });
-    selector.click();
-    const visibleDropdown = () => Array.from(
-      document.querySelectorAll<HTMLElement>('.ud__select__dropdown')
-    ).filter(candidate => {
-      const style = window.getComputedStyle(candidate);
-      return !candidate.classList.contains('ud__select__dropdown-hidden')
-        && style.display !== 'none'
-        && style.visibility !== 'hidden';
-    }).pop();
-    await this.waitFor(() => Boolean(visibleDropdown()), 900);
+    const expanded = element.getAttribute('aria-expanded') === 'true'
+      || trigger.getAttribute('aria-expanded') === 'true';
+    if (!expanded || this.collectDropdownCandidates(element, visibleBeforeOpen).length === 0) {
+      trigger.click();
+    }
 
-    const dropdown = visibleDropdown();
-    const options = Array.from(
-      dropdown?.querySelectorAll<HTMLElement>('.ud__select__list__item') || []
+    await this.waitFor(
+      () => this.collectDropdownCandidates(element, visibleBeforeOpen).length > 0,
+      550,
     );
-    const normalizedValue = value.trim().toLowerCase();
-    const dateIndex = findDateOptionIndex(value, options.map(option => (option.textContent || '').trim()));
-    const target = dateIndex >= 0 ? options[dateIndex] : options.find(option => {
-      const text = (option.textContent || '').trim();
-      const normalizedText = text.toLowerCase();
-      return (
-        normalizedText === normalizedValue ||
-        normalizedText.includes(normalizedValue) ||
-        normalizedValue.includes(normalizedText)
-      );
-    });
+    let candidates = this.collectDropdownCandidates(element, visibleBeforeOpen);
+    let target = this.findDropdownCandidate(value, candidates);
+
+    if (!target && this.isSearchableCombobox(element, trigger)) {
+      this.setComboboxSearchValue(element, value);
+      await this.waitFor(() => {
+        candidates = this.collectDropdownCandidates(element, visibleBeforeOpen);
+        return Boolean(this.findDropdownCandidate(value, candidates));
+      }, 550);
+      target = this.findDropdownCandidate(value, candidates);
+    }
 
     if (!target) {
-      document.body.click();
+      target = await this.findVirtualizedDropdownCandidate(element, visibleBeforeOpen, value);
+    }
+    if (!target) {
+      this.closeDropdown(element);
       return false;
     }
 
-    target.dispatchEvent(new MouseEvent('mousedown', {
-      bubbles: true,
-      cancelable: true,
-      view: window,
-    }));
-    target.dispatchEvent(new MouseEvent('mouseup', {
-      bubbles: true,
-      cancelable: true,
-      view: window,
-    }));
-    target.click();
+    const targetText = this.getDropdownOptionText(target);
+    this.activateDropdownOption(target);
+    let committed = await this.waitFor(
+      () => this.isDropdownSelectionCommitted(element, trigger, target, targetText, value),
+      450,
+    );
+    if (!committed && target.closest('.ud__select__dropdown')) {
+      this.activateReactOptionFallback(target);
+      committed = await this.waitFor(
+        () => this.isDropdownSelectionCommitted(element, trigger, target, targetText, value),
+        250,
+      );
+    }
+    return committed || this.isDropdownSelectionCommitted(element, trigger, target, targetText, value);
+  }
 
+  private collectDropdownCandidates(
+    element: HTMLInputElement,
+    visibleBeforeOpen: Set<HTMLElement>,
+  ): HTMLElement[] {
+    const root = element.getRootNode() as Document | ShadowRoot;
+    const controlledId = element.getAttribute('aria-controls') || element.getAttribute('aria-owns');
+    const controlled = controlledId ? root.getElementById(controlledId) : null;
+    if (controlled) {
+      const controlledOptions = this.getVisibleOptionsWithin(controlled);
+      if (controlledOptions.length > 0) return controlledOptions;
+    }
+
+    const popupSelector = [
+      '[role="listbox"]', '[role="tree"]',
+      '.ud__select__dropdown:not(.ud__select__dropdown-hidden)',
+      '.ant-select-dropdown:not(.ant-select-dropdown-hidden)',
+      '.ant-cascader-menus', '.el-select-dropdown', '.el-cascader__dropdown',
+      '.MuiAutocomplete-popper', '.react-select__menu', '.semi-select-dropdown',
+      '.arco-select-popup', '.arco-cascader-popup',
+    ].join(',');
+    const popups = Array.from(root.querySelectorAll<HTMLElement>(popupSelector))
+      .filter(popup => this.isElementVisible(popup));
+    const popupOptions = popups.reverse().map(popup => this.getVisibleOptionsWithin(popup));
+    for (const options of popupOptions) {
+      const newlyVisible = options.filter(option => !visibleBeforeOpen.has(option));
+      if (newlyVisible.length > 0) return newlyVisible;
+    }
+    for (const options of popupOptions) {
+      if (options.length > 0) return options;
+    }
+
+    // Some home-grown widgets append bare role=option nodes without a listbox.
+    // Only accept nodes that became visible after opening the current control.
+    return this.getAllVisibleDropdownOptions(element)
+      .filter(option => !visibleBeforeOpen.has(option));
+  }
+
+  private getAllVisibleDropdownOptions(element: HTMLInputElement): HTMLElement[] {
+    const root = element.getRootNode() as Document | ShadowRoot;
+    return Array.from(root.querySelectorAll<HTMLElement>([
+      '[role="option"]', '[role="treeitem"]',
+      '.ud__select__list__item', '.ant-select-item-option',
+      '.ant-cascader-menu-item', '.el-select-dropdown__item', '.el-cascader-node',
+      '.MuiAutocomplete-option', '.react-select__option', '.semi-select-option',
+      '.arco-select-option', '.arco-cascader-option',
+    ].join(','))).filter(option => (
+      this.isElementVisible(option)
+      && option.getAttribute('aria-disabled') !== 'true'
+      && !option.matches('[disabled], .is-disabled, .ant-select-item-option-disabled')
+    ));
+  }
+
+  private getVisibleOptionsWithin(container: Element): HTMLElement[] {
+    const selector = [
+      '[role="option"]', '[role="treeitem"]',
+      '.ud__select__list__item', '.ant-select-item-option',
+      '.ant-cascader-menu-item', '.el-select-dropdown__item', '.el-cascader-node',
+      '.MuiAutocomplete-option', '.react-select__option', '.semi-select-option',
+      '.arco-select-option', '.arco-cascader-option',
+    ].join(',');
+    return Array.from(container.querySelectorAll<HTMLElement>(selector)).filter(option => (
+      this.isElementVisible(option)
+      && option.getAttribute('aria-disabled') !== 'true'
+      && !option.matches('[disabled], .is-disabled, .ant-select-item-option-disabled')
+    ));
+  }
+
+  private isElementVisible(element: HTMLElement): boolean {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== 'none'
+      && style.visibility !== 'hidden'
+      && style.opacity !== '0'
+      && rect.width > 0
+      && rect.height > 0;
+  }
+
+  private getDropdownOptionText(option: HTMLElement): string {
+    return (option.getAttribute('aria-label')
+      || option.getAttribute('title')
+      || option.textContent
+      || '').replace(/\s+/g, ' ').trim();
+  }
+
+  private findDropdownCandidate(value: string, candidates: HTMLElement[]): HTMLElement | null {
+    const texts = candidates.map(candidate => this.getDropdownOptionText(candidate));
+    const dateIndex = findDateOptionIndex(value, texts);
+    const index = dateIndex >= 0 ? dateIndex : findBestDropdownOptionIndex(value, texts);
+    return index >= 0 ? candidates[index] : null;
+  }
+
+  private isSearchableCombobox(element: HTMLInputElement, trigger: HTMLElement): boolean {
+    if (element.readOnly || element.disabled) return false;
+    if (trigger.closest('.ant-picker, .el-date-editor, .arco-picker, .semi-datepicker, [data-picker]')) {
+      return false;
+    }
+    return ['list', 'both'].includes(element.getAttribute('aria-autocomplete') || '')
+      || Boolean(trigger.closest(
+        '.ant-select-show-search, .el-select, .MuiAutocomplete-root, .react-select__control, .semi-select, .arco-select'
+      ));
+  }
+
+  private setComboboxSearchValue(element: HTMLInputElement, value: string): void {
+    const oldValue = element.value;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    if (setter) setter.call(element, value);
+    else element.value = value;
+    (element as HTMLInputElement & {
+      _valueTracker?: { setValue: (trackedValue: string) => void };
+    })._valueTracker?.setValue(oldValue);
+    element.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertText',
+      data: value,
+    }));
+    element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+  }
+
+  private async findVirtualizedDropdownCandidate(
+    element: HTMLInputElement,
+    visibleBeforeOpen: Set<HTMLElement>,
+    value: string,
+  ): Promise<HTMLElement | null> {
+    let candidates = this.collectDropdownCandidates(element, visibleBeforeOpen);
+    const first = candidates[0];
+    const scrollContainer = first?.closest<HTMLElement>(
+      '.rc-virtual-list-holder, .el-scrollbar__wrap, .ant-select-dropdown, [role="listbox"], [role="tree"]'
+    );
+    if (!scrollContainer || scrollContainer.scrollHeight <= scrollContainer.clientHeight) return null;
+
+    const originalScrollTop = scrollContainer.scrollTop;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const nextTop = Math.min(
+        scrollContainer.scrollHeight - scrollContainer.clientHeight,
+        scrollContainer.scrollTop + Math.max(80, scrollContainer.clientHeight * 0.8),
+      );
+      if (nextTop <= scrollContainer.scrollTop) break;
+      scrollContainer.scrollTop = nextTop;
+      scrollContainer.dispatchEvent(new Event('scroll', { bubbles: true }));
+      await this.wait(35);
+      candidates = this.collectDropdownCandidates(element, visibleBeforeOpen);
+      const target = this.findDropdownCandidate(value, candidates);
+      if (target) return target;
+    }
+    scrollContainer.scrollTop = originalScrollTop;
+    scrollContainer.dispatchEvent(new Event('scroll', { bubbles: true }));
+    return null;
+  }
+
+  private activateDropdownOption(target: HTMLElement): void {
+    target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+    target.click();
+  }
+
+  // Older ByteDance components occasionally ignore synthetic DOM clicks and keep
+  // the actual handler on a React private prop. Invoke it only after read-back has
+  // proved the normal click did not commit, avoiding a duplicate toggle.
+  private activateReactOptionFallback(target: HTMLElement): void {
     const reactKey = Object.keys(target).find(
       key => key.startsWith('__reactEventHandlers$') || key.startsWith('__reactProps$')
     );
     const handlers = reactKey ? (target as any)[reactKey] : null;
-    if (typeof handlers?.onClick === 'function') {
-      handlers.onClick({
-        target,
-        currentTarget: target,
-        type: 'click',
-        nativeEvent: new MouseEvent('click'),
-        bubbles: true,
-        cancelable: true,
-        preventDefault: () => {},
-        stopPropagation: () => {},
-        isDefaultPrevented: () => false,
-        isPropagationStopped: () => false,
-        persist: () => {},
-      });
-    }
+    if (typeof handlers?.onClick !== 'function') return;
+    handlers.onClick({
+      target,
+      currentTarget: target,
+      type: 'click',
+      nativeEvent: new MouseEvent('click'),
+      bubbles: true,
+      cancelable: true,
+      preventDefault: () => {},
+      stopPropagation: () => {},
+      isDefaultPrevented: () => false,
+      isPropagationStopped: () => false,
+      persist: () => {},
+    });
+  }
 
-    const container = element.closest<HTMLElement>(
-      '[data-form-field-id], [data-form-field-name], [data-form-field-i18n-name]'
-    );
-    await this.waitFor(() => Boolean((
-      container?.querySelector('.ud__select__selector__selectItem')?.textContent || element.value
-    ).trim()), 600);
-    const selectedText = (
-      container?.querySelector('.ud__select__selector__selectItem')?.textContent || element.value
-    ).trim().toLowerCase();
-    return Boolean(selectedText) && (
-      selectedText === normalizedValue
-      || selectedText.includes(normalizedValue)
-      || normalizedValue.includes(selectedText)
-    );
+  private readComboboxDisplayValue(element: HTMLInputElement, trigger: HTMLElement): string {
+    const container = trigger.closest<HTMLElement>(
+      '[data-form-field-id], [data-form-field-name], [data-form-field-i18n-name], .ud__select, .ant-select, .el-select, .MuiAutocomplete-root, .react-select__control, .semi-select, .arco-select, [class*="cascader" i]'
+    ) || trigger;
+    const displayed = Array.from(container.querySelectorAll<HTMLElement>([
+      '.ud__select__selector__selectItem', '.ant-select-selection-item',
+      '.ant-select-selection-item-content', '.el-select__selected-item',
+      '.el-tag__content', '.MuiAutocomplete-tag .MuiChip-label',
+      '.react-select__multi-value__label', '.semi-select-selection-text',
+      '.arco-select-view-value', '[aria-selected="true"]',
+    ].join(','))).map(item => (item.textContent || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    return Array.from(new Set(displayed)).join('、') || element.value.trim();
+  }
+
+  private isDropdownSelectionCommitted(
+    element: HTMLInputElement,
+    trigger: HTMLElement,
+    target: HTMLElement,
+    targetText: string,
+    requestedValue: string,
+  ): boolean {
+    const selected = this.readComboboxDisplayValue(element, trigger);
+    return target.getAttribute('aria-selected') === 'true'
+      || target.matches('.is-selected, .ant-select-item-option-selected')
+      || dropdownValueMatches(selected, targetText)
+      || dropdownValueMatches(selected, requestedValue);
+  }
+
+  private closeDropdown(element: HTMLInputElement): void {
+    element.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape',
+      code: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    }));
   }
 
   // 填充下拉框
@@ -1018,41 +1199,16 @@ export class FormFiller {
     const optionValues = Array.from(element.options).map(option => option.value.trim());
     const dateIndex = findDateOptionIndex(value, optionTexts);
     const dateValueIndex = dateIndex >= 0 ? dateIndex : findDateOptionIndex(value, optionValues);
-    if (dateValueIndex >= 0) {
-      element.selectedIndex = dateValueIndex;
-      this.triggerEvents(element);
-      return true;
-    }
-    // 尝试精确匹配
-    for (let i = 0; i < element.options.length; i++) {
-      const option = element.options[i];
-      if (!option.value && !option.text.trim()) continue;
-      if (
-        option.value === value ||
-        option.text === value ||
-        option.text.includes(value) ||
-        value.includes(option.text)
-      ) {
-        element.selectedIndex = i;
-        this.triggerEvents(element);
-        return true;
-      }
-    }
+    const textIndex = findBestDropdownOptionIndex(value, optionTexts);
+    const valueIndex = findBestDropdownOptionIndex(value, optionValues);
+    const selectedIndex = dateValueIndex >= 0
+      ? dateValueIndex
+      : textIndex >= 0 ? textIndex : valueIndex;
+    if (selectedIndex < 0 || element.options[selectedIndex]?.disabled) return false;
 
-    // 如果没有匹配，尝试部分匹配
-    for (let i = 0; i < element.options.length; i++) {
-      const option = element.options[i];
-      if (!option.value && !option.text.trim()) continue;
-      const optionText = option.text.toLowerCase();
-      const valueLower = value.toLowerCase();
-
-      if (optionText.includes(valueLower) || valueLower.includes(optionText)) {
-        element.selectedIndex = i;
-        this.triggerEvents(element);
-        return true;
-      }
-    }
-    return false;
+    element.selectedIndex = selectedIndex;
+    this.triggerEvents(element);
+    return true;
   }
 
   // 填充输入框

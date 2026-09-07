@@ -40,6 +40,7 @@ import {
 import type { AIFillSectionPayload } from '../services/llm/prompts.ts';
 import type { LLMConfig } from '../services/llm/types.ts';
 import { buildFieldMatchingCacheKey } from '../services/llm/fieldMatchingCache.ts';
+import { findBestDropdownOptionIndex } from '../utils/dropdownOption.ts';
 import {
   getLearnedFieldsForDomain,
   updateLearnedFieldStore,
@@ -444,10 +445,14 @@ async function handleAIFillSection(
       if (!field || typeof rawValue !== 'string') continue;
 
       const value = rawValue.trim();
-      if (!value) continue;
-      if (field.options.length > 0 && !field.options.includes(value)) continue;
-      if (!isAllowedProfileValue(value, allowedProfileValues)) continue;
-      mappings[index] = value;
+      if (!value || !isAllowedProfileValue(value, allowedProfileValues)) continue;
+      if (field.options.length > 0) {
+        const optionIndex = findBestDropdownOptionIndex(value, field.options);
+        if (optionIndex < 0) continue;
+        mappings[index] = field.options[optionIndex];
+      } else {
+        mappings[index] = value;
+      }
     }
 
     return { success: true, data: mappings };
