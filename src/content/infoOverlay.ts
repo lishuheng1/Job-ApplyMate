@@ -5,6 +5,7 @@ const HOST_ID = 'job-applymate-info-overlay-host';
 const POSITION_KEY = 'jobApplyMateInfoOverlayPosition';
 const PANEL_WIDTH = 420;
 const EDGE_GAP = 12;
+const CONTROLLER_KEY = '__jobApplyMateInfoOverlayControllerV1__';
 
 type Position = { left: number; top: number };
 type FieldItem = { key: string; label: string; value: string };
@@ -31,10 +32,16 @@ export function createInfoOverlayController(options: {
   writeValue: (value: string) => Promise<{ written: boolean; reason?: string }>;
   openSettings: () => void;
 }): InfoOverlayController {
+  const controllerRegistry = globalThis as typeof globalThis & {
+    [CONTROLLER_KEY]?: InfoOverlayController;
+  };
+  // content.js 可能被网站导航和连接恢复流程重复注入。先停用旧控制器，避免多个“自动恢复”实例叠在一起。
+  controllerRegistry[CONTROLLER_KEY]?.destroy();
   let host: HTMLDivElement | null = null;
   let shadow: ShadowRoot | null = null;
   let statusTimer: number | null = null;
   let visible = false;
+  let disposed = false;
 
   const setHostPosition = (position: Position) => {
     if (!host) return;
@@ -222,6 +229,7 @@ export function createInfoOverlayController(options: {
   };
 
   const open = async () => {
+    if (disposed) return;
     ensureHost();
     if (!host) return;
     visible = true;
@@ -248,10 +256,13 @@ export function createInfoOverlayController(options: {
   });
   observer.observe(document.documentElement, { childList: true });
 
-  return {
+  const controller: InfoOverlayController = {
     open,
     destroy() {
+      if (disposed) return;
+      disposed = true;
       visible = false;
+      if (statusTimer !== null) window.clearTimeout(statusTimer);
       observer.disconnect();
       window.removeEventListener('resize', onResize);
       host?.remove();
@@ -259,6 +270,8 @@ export function createInfoOverlayController(options: {
       shadow = null;
     },
   };
+  controllerRegistry[CONTROLLER_KEY] = controller;
+  return controller;
 }
 
 function buildSections(profile: UserProfile): Section[] {

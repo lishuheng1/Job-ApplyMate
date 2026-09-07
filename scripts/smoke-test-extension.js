@@ -212,6 +212,28 @@ try {
     return Boolean(host?.isConnected);
   })()`);
   if (!overlayRestored) throw new Error('信息浮窗被页面移除后未自动恢复');
+  const duplicateInjection = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
+    const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
+    if (!tabs[0]?.id) return { success: false, error: '测试页标签不存在' };
+    await chrome.scripting.executeScript({ target: { tabId: tabs[0].id, frameIds: [0] }, files: ['content.js'] });
+    await chrome.scripting.executeScript({ target: { tabId: tabs[0].id, frameIds: [0] }, files: ['content.js'] });
+    return chrome.tabs.sendMessage(tabs[0].id, { type: 'OPEN_INFO_OVERLAY' });
+  })()`);
+  if (!duplicateInjection?.success) throw new Error(`重复注入场景打开浮窗失败：${JSON.stringify(duplicateInjection)}`);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const singleCloseState = await evaluate(webSocketUrl, `(async () => {
+    const hosts = Array.from(document.querySelectorAll('[data-job-applymate-overlay="true"]'));
+    hosts[0]?.shadowRoot?.querySelector('[data-close]')?.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    return {
+      hostCount: hosts.length,
+      visibleCount: Array.from(document.querySelectorAll('[data-job-applymate-overlay="true"]'))
+        .filter(host => getComputedStyle(host).display !== 'none').length
+    };
+  })()`);
+  if (singleCloseState?.hostCount !== 1 || singleCloseState.visibleCount !== 0) {
+    throw new Error(`悬浮窗重复实例未被正确清理：${JSON.stringify(singleCloseState)}`);
+  }
   const review = await evaluate(webSocketUrl, `({
     count: document.querySelectorAll('[data-failure-review-item="true"]').length,
     labels: Array.from(document.querySelectorAll('[data-failure-review-label="true"]')).map(item => item.textContent),
@@ -224,6 +246,7 @@ try {
   console.log(`✓ 真实浏览器识别到 ${detection.data.count} 个可填字段`);
   console.log(`✓ 真实浏览器快速填充成功（${quickFill.durationMs}ms）`);
   console.log('✓ 网页内信息浮窗固定在最高层级，可写入主页面和子框架字段，被移除后会自动恢复');
+  console.log('✓ content.js 即使重复注入，悬浮窗也只有一个实例且关闭一次即可隐藏');
   console.log('✓ 失败复盘会过滤辅助输入框，并把同一逻辑字段去重为 1 项');
 } finally {
   if (process.platform === 'win32' && browser.pid) {
