@@ -90,6 +90,46 @@ test('合法 V1 文档完整保留简历和 API Key', () => {
   assert.equal(result.document.data.applicationRecords?.[0]?.companyName, '字节跳动');
 });
 
+test('V1 备份可保存多份简历的分类与原文件名', () => {
+  const document = JSON.parse(validJson());
+  document.data.userProfile.resumes = [
+    {
+      id: 'resume-pm',
+      category: '产品岗',
+      fileName: '张三-产品经理.pdf',
+      fileData: 'data:application/pdf;base64,QUJD',
+      fileType: 'pdf',
+      uploadDate: '2026-09-07T00:00:00.000Z',
+    },
+    {
+      id: 'resume-data',
+      category: '数据岗',
+      fileName: '张三-数据分析.pdf',
+      fileData: 'data:application/pdf;base64,REVG',
+      fileType: 'pdf',
+      uploadDate: '2026-09-07T00:00:00.000Z',
+    },
+  ];
+  const result = parseAndValidateBackup(JSON.stringify(document));
+  assert.equal(result.success, true);
+  if (!result.success) return;
+  assert.equal(result.document.schemaVersion, 1);
+  assert.equal(result.document.data.userProfile?.resumes?.[1]?.category, '数据岗');
+  assert.equal(result.document.data.userProfile?.resumes?.[1]?.fileName, '张三-数据分析.pdf');
+  assert.equal(createBackupSummary(result.document).hasResumeFile, true);
+});
+
+test('多简历条目中的文件数据必须为字符串', () => {
+  const document = JSON.parse(validJson());
+  document.data.userProfile.resumes = [{
+    id: 'bad', category: '产品岗', fileName: 'resume.pdf', fileData: 123,
+    fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z',
+  }];
+  const result = parseAndValidateBackup(JSON.stringify(document));
+  assert.equal(result.success, false);
+  if (!result.success) assert.equal(result.error.code, 'INVALID_USER_PROFILE');
+});
+
 test('合法 V1 文档完整保留自定义视觉开关', () => {
   const json = serializeBackup(createBackupDocument({
     ...completeData,

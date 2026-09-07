@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Job ApplyMate",
-  "version": "1.1.7",
+  "version": "1.2.0",
   "minimum_chrome_version": "116",
   "description": "你的求职申请搭档：识别并填写网申表单、解析简历和管理投递记录",
   "permissions": [
     "storage",
+    "unlimitedStorage",
     "scripting",
     "activeTab",
     "clipboardWrite",

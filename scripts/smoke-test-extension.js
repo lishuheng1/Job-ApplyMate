@@ -25,6 +25,7 @@ const server = createServer((request, response) => {
   response.end(`<!doctype html><html><head><title>Job ApplyMate smoke</title></head><body>
     <form><label for="name">姓名</label><input id="name" name="name" required>
     <label for="email">邮箱</label><input id="email" name="email" type="email" required>
+    <label for="resume">上传简历</label><input id="resume" name="resume" type="file" accept=".pdf">
     <label for="intro">请介绍你自己</label><textarea id="intro" name="intro"></textarea>
     <div class="form-item"><label id="custom-label">自定义必答题</label>
       <input id="custom-primary" aria-labelledby="custom-label" aria-required="true">
@@ -120,21 +121,29 @@ try {
   const targets = await fetch(`http://127.0.0.1:${debugPort}/json/list`).then(response => response.json());
   const serviceWorker = targets.find(item => item.type === 'service_worker' && /\/background\.js$/.test(item.url));
   if (!serviceWorker?.webSocketDebuggerUrl) throw new Error('未找到 Job ApplyMate 后台脚本');
-  const detection = await evaluate(serviceWorker.webSocketDebuggerUrl, `new Promise(resolve => {
-    chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} }, tabs => {
-      if (!tabs[0]?.id) { resolve({ success: false, error: '测试页标签不存在' }); return; }
-      chrome.tabs.sendMessage(tabs[0].id, { type: 'DETECT_FIELDS' }, response => {
-        resolve(response || { success: false, error: chrome.runtime.lastError?.message || '无响应' });
-      });
-    });
-  })`);
+  const detection = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
+    const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
+    if (!tabs[0]?.id) return { success: false, error: '测试页标签不存在' };
+    let response;
+    for (const delay of [0, 150, 300, 500]) {
+      if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+      response = await chrome.tabs.sendMessage(tabs[0].id, { type: 'DETECT_FIELDS' });
+      if (Number(response?.data?.count || 0) >= 2) break;
+    }
+    return response || { success: false, error: '无响应' };
+  })()`);
   if (!detection?.success || Number(detection.data?.count || 0) < 2) {
     throw new Error(`真实浏览器字段检测失败：${JSON.stringify(detection)}`);
   }
   const quickFill = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
     await chrome.storage.local.set({ userProfile: {
       personal: { name: '测试用户', gender: '', birthDate: '', phone: '', email: 'smoke@example.com', currentAddress: '上海市' },
-      education: [], experience: [], projects: [], customInformation: [], skills: [], certifications: []
+      education: [], experience: [], projects: [], customInformation: [], skills: [], certifications: [],
+      resume: { fileName: '产品经理原名.pdf', fileData: 'data:application/pdf;base64,JVBERi0xLjQ=', fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z' },
+      resumes: [
+        { id: 'resume-product', category: '产品岗', fileName: '产品经理原名.pdf', fileData: 'data:application/pdf;base64,JVBERi0xLjQ=', fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z' },
+        { id: 'resume-operations', category: '运营岗', fileName: '运营岗位定制版.pdf', fileData: 'data:application/pdf;base64,JVBERi0xLjQ=', fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z' }
+      ]
     } });
     const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
     if (!tabs[0]?.id) return { success: false, error: '测试页标签不存在' };
@@ -142,7 +151,7 @@ try {
     const startedAt = performance.now();
     const fill = await chrome.tabs.sendMessage(tabs[0].id, {
       type: 'FILL_FORM',
-      payload: { reusePreview: true }
+      payload: { reusePreview: true, resumeId: 'resume-operations' }
     });
     return {
       success: Boolean(preview?.success && fill?.success),
@@ -156,10 +165,24 @@ try {
   }
   const filledValues = await evaluate(webSocketUrl, `({
     name: document.querySelector('#name')?.value,
-    email: document.querySelector('#email')?.value
+    email: document.querySelector('#email')?.value,
+    resumeName: document.querySelector('#resume')?.files?.[0]?.name || ''
   })`);
-  if (filledValues?.name !== '测试用户' || filledValues?.email !== 'smoke@example.com') {
+  if (filledValues?.name !== '测试用户' || filledValues?.email !== 'smoke@example.com' || filledValues?.resumeName !== '运营岗位定制版.pdf') {
     throw new Error(`真实浏览器写入结果错误：${JSON.stringify(filledValues)}`);
+  }
+  await evaluate(webSocketUrl, `(() => {
+    document.querySelector('#name').value = '';
+    document.querySelector('#email').value = '';
+    document.querySelector('#resume').value = '';
+  })()`);
+  const skipResumeFill = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
+    const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
+    return chrome.tabs.sendMessage(tabs[0].id, { type: 'FILL_FORM', payload: { resumeId: null } });
+  })()`);
+  const skippedResumeName = await evaluate(webSocketUrl, `document.querySelector('#resume')?.files?.[0]?.name || ''`);
+  if (!skipResumeFill?.success || skippedResumeName) {
+    throw new Error(`选择不上传简历时仍写入了文件：${JSON.stringify({ skipResumeFill, skippedResumeName })}`);
   }
   const overlayOpen = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
     const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
@@ -245,6 +268,7 @@ try {
   console.log('✓ content.js 在真实浏览器表单页中成功初始化');
   console.log(`✓ 真实浏览器识别到 ${detection.data.count} 个可填字段`);
   console.log(`✓ 真实浏览器快速填充成功（${quickFill.durationMs}ms）`);
+  console.log('✓ 可按分类选择指定简历上传，也可明确选择本次不上传');
   console.log('✓ 网页内信息浮窗固定在最高层级，可写入主页面和子框架字段，被移除后会自动恢复');
   console.log('✓ content.js 即使重复注入，悬浮窗也只有一个实例且关闭一次即可隐藏');
   console.log('✓ 失败复盘会过滤辅助输入框，并把同一逻辑字段去重为 1 项');

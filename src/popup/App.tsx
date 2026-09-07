@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { MessageService } from '../shared/message';
 import type { FillPreviewItem, Message, MessageResponse, UserProfile } from '../shared/types';
 import type { LLMConfig } from '../services/llm/types';
+import { getResumeLibrary } from '../shared/resumes.ts';
 
 const APPLICATION_RECORDS_PAGE = 'src/application-records/index.html';
 
@@ -62,6 +63,9 @@ function App() {
   const [openingApplicationRecords, setOpeningApplicationRecords] = useState(false);
   const [detectedFields, setDetectedFields] = useState(0);
   const [undoing, setUndoing] = useState(false);
+  const [selectedResumeId, setSelectedResumeId] = useState('none');
+  const resumeLibrary = profile ? getResumeLibrary(profile) : [];
+  const selectedResume = resumeLibrary.find(resume => resume.id === selectedResumeId);
 
   useEffect(() => {
     loadProfile();
@@ -128,6 +132,7 @@ function App() {
         const confirmed = window.confirm(
           `准备填写 ${preview.data.items.length} 项：\n\n${lines.join('\n')}`
           + (remaining > 0 ? `\n……另有 ${remaining} 项` : '')
+          + `\n\n本次简历：${selectedResume ? `${selectedResume.category}｜${selectedResume.fileName}` : '不自动上传'}`
           + '\n\n确认写入吗？写入后可使用“撤销上次填充”。'
         );
         if (!confirmed) return;
@@ -135,7 +140,10 @@ function App() {
 
       const response = await sendMessageToActiveTab(tab.id, {
         type: 'FILL_FORM',
-        payload: { reusePreview: true },
+        payload: {
+          reusePreview: true,
+          resumeId: selectedResume?.id || null,
+        },
       }, messageSession);
 
       if (response.success) {
@@ -167,6 +175,7 @@ function App() {
 
       const response = await sendMessageToActiveTab(tab.id, {
         type: 'START_AI_PAGE_FILL',
+        payload: { resumeId: selectedResume?.id || null },
       });
 
       if (!response.success) {
@@ -455,6 +464,24 @@ function App() {
         )}
 
         <div className="popup-actions">
+          {profile && (
+            <label className="resume-picker">
+              <span>本次简历</span>
+              <select
+                value={selectedResumeId}
+                onChange={event => setSelectedResumeId(event.target.value)}
+                aria-label="选择本次自动上传的简历"
+              >
+                <option value="none">不自动上传简历</option>
+                {resumeLibrary.map(resume => (
+                  <option key={resume.id} value={resume.id}>
+                    {resume.category}｜{resume.fileName}
+                  </option>
+                ))}
+              </select>
+              <small>快速填充和 AI 扫描只会上传这里选择的文件</small>
+            </label>
+          )}
           <button
             onClick={() => void handleOpenSidePanel()}
             disabled={openingView}

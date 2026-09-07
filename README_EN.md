@@ -22,6 +22,7 @@ Job ApplyMate is a Chrome and Edge extension that keeps job-application informat
 | AI Page Scan | Match the page as structured form blocks and keep every education, work, or project block bound to one profile record |
 | AI Region Fill | Select a form area and use a vision-capable model to fill only the empty controls in that area |
 | Information panel | Focus a web form control and write one saved profile value at a time; rejected values are copied automatically |
+| Resume library | Store multiple role-specific resumes with their original filenames and internal categories; choose one file or no upload for each fill |
 | Resume parsing | Import PDF, DOCX, Markdown, TXT, and structured JSON resumes |
 | Application tracker | Create, filter, sort, edit, delete, and import/export application records as CSV |
 | Backup and sync | Versioned JSON import/export and optional conflict-aware WebDAV synchronization |
@@ -71,15 +72,16 @@ AI configuration is optional. Regular profile management, local resume parsing, 
 
 ### 2. Import a resume
 
-Open **简历上传** (Resume Upload) in Settings and select a PDF, DOCX, Markdown, TXT, or structured JSON file. Review the parsed information and save the profile before filling forms.
+Open **简历库** (Resume Library) in Settings, enter an internal category such as Product or Operations, and add a PDF, DOCX, Markdown, TXT, or structured JSON file. Job ApplyMate preserves the original filename. You can store, recategorize, and delete multiple resumes. Review the parsed information and save the profile before filling forms.
 
 ### 3. Fill an application form
 
 1. Open a job application or resume form.
 2. Click the Job ApplyMate icon.
-3. Select **快速填充** (Quick Fill).
-4. Review all values written to the page.
-5. If a field could not be filled, use the review panel in the lower-right corner:
+3. In **本次简历** (Resume for this fill), choose no automatic upload or one categorized resume.
+4. Select **快速填充** (Quick Fill). Only the explicitly selected resume is uploaded.
+5. Review all values written to the page.
+6. If a field could not be filled, use the review panel in the lower-right corner:
    - enter a corrected value and choose **填写并记住** (Fill and Remember);
    - choose **本次不填** (Skip This Time) for one item; or
    - choose **本次全部不填** (Skip All This Time).
@@ -88,7 +90,7 @@ Learned values are isolated by website and logical field. When a correction matc
 
 ### 4. Use AI Page Scan
 
-Configure an AI provider in **AI 设置**, open an application page, and select **AI 扫描填充**. Job ApplyMate builds logical controls and DOM form blocks, matches the remaining page in one request, and writes only validated profile-backed values. Resume files, extracted resume text, and internal record IDs are excluded from page-scan requests. Existing non-empty fields are not overwritten.
+Configure an AI provider in **AI 设置**, open an application page, choose no resume or a specific file in **本次简历**, and select **AI 扫描填充**. Job ApplyMate builds logical controls and DOM form blocks, matches the remaining page in one request, and writes only validated profile-backed values. Resume files, extracted resume text, and internal record IDs are excluded from page-scan requests. Existing non-empty fields are not overwritten.
 
 ### 5. Use AI Region Fill
 

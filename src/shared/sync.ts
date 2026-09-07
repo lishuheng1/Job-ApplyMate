@@ -9,6 +9,7 @@ import type {
 import { serializeApplicationRecordsCsv } from './applicationRecords.ts';
 import { createBackupDocument, createBackupSummary, parseAndValidateBackup, serializeBackup } from './backup.ts';
 import { StorageService } from './storage.ts';
+import { LEGACY_RESUME_ID } from './resumes.ts';
 import {
   getRemoteDocument,
   putRemoteApplicationRecordsCsv,
@@ -31,8 +32,21 @@ function sortedValue(value: unknown): unknown {
 }
 
 function normalizeBusinessData(data: BackupData): BackupData {
+  const profile = data.userProfile;
+  let userProfile = profile;
+  const onlyResume = profile?.resumes?.[0];
+  if (
+    profile?.resumes?.length === 1
+    && onlyResume?.id === LEGACY_RESUME_ID
+    && profile.resume?.fileName === onlyResume.fileName
+    && profile.resume?.fileData === onlyResume.fileData
+  ) {
+    const { resumes: _migratedLibrary, ...legacyCompatibleProfile } = profile;
+    userProfile = legacyCompatibleProfile;
+  }
   return {
     ...data,
+    userProfile,
     applicationRecords: data.applicationRecords ?? [],
   };
 }

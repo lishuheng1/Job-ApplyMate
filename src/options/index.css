@@ -339,6 +339,36 @@ textarea:focus {
   text-align: center;
 }
 
+.resume-category-field {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 16px;
+  text-align: left;
+}
+
+.resume-category-field > span {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.resume-category-field input,
+.resume-library-main input {
+  width: 100%;
+  min-height: 39px;
+  padding: 9px 11px;
+  border: 1px solid #cfd7d4;
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: #fff;
+  font: inherit;
+}
+
+.resume-category-field small {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
 .upload-area {
   position: relative;
   padding: 48px 24px;
@@ -452,6 +482,69 @@ textarea:focus {
 
 .resume-item span {
   color: var(--color-muted);
+}
+
+.resume-library-list {
+  display: grid;
+  gap: 10px;
+}
+
+.resume-library-item {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.resume-file-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 48px;
+  border-radius: 8px;
+  color: #fff;
+  background: #0f766e;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.resume-library-main {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.resume-library-main input {
+  min-height: 34px;
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.resume-library-main strong {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resume-library-main small {
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.resume-remove-button {
+  padding: 7px 10px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #b91c1c;
+  background: #fff7f7;
+  cursor: pointer;
 }
 
 .options-actions {

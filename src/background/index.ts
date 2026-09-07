@@ -61,6 +61,7 @@ import {
 } from './visualRegionFill.ts';
 import { areEquivalentDates } from '../utils/dateValue.ts';
 import { ensureContentScriptForTab } from './contentScriptConnection.ts';
+import { createResumeVariant, getResumeLibrary } from '../shared/resumes.ts';
 
 // Background Service Worker 入口
 console.log('Background service worker started');
@@ -122,7 +123,7 @@ function inferProfilePath(profile: UserProfile | null, expected: string): string
       return;
     }
     for (const [key, child] of Object.entries(value)) {
-      if (['fileData', 'parsedText', 'rawText', 'resume'].includes(key)) continue;
+      if (['fileData', 'parsedText', 'rawText', 'resume', 'resumes'].includes(key)) continue;
       visit(child, path ? `${path}.${key}` : key);
     }
   };
@@ -176,6 +177,7 @@ export async function handleMessage(
         message.payload.file,
         message.payload.fileType,
         message.payload.fileName,
+        message.payload.category,
         message.payload.rawText
       );
 
@@ -475,7 +477,7 @@ function collectProfileValues(profile: UserProfile): string[] {
       return;
     }
     for (const [childKey, child] of Object.entries(value)) {
-      if (['resume', 'fileData', 'parsedText', 'rawText'].includes(childKey)) continue;
+      if (['resume', 'resumes', 'fileData', 'parsedText', 'rawText'].includes(childKey)) continue;
       visit(child, childKey);
     }
   };
@@ -582,6 +584,7 @@ async function handleParseResume(
   fileData: string,
   fileType: string,
   fileName: string,
+  category?: string,
   preParsedText?: string
 ): Promise<MessageResponse> {
   try {
@@ -614,6 +617,16 @@ async function handleParseResume(
 
     const currentProfile = await StorageService.getUserProfile();
 
+    const resume = createResumeVariant({
+      fileName,
+      fileData,
+      fileType,
+      parsedText: rawText,
+      uploadDate: new Date().toISOString(),
+    }, {
+      id: `resume-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
+      category,
+    });
     const updatedProfile: UserProfile = {
       // 解析结果里的空值不能覆盖用户已填的内容
       personal: {
@@ -626,13 +639,9 @@ async function handleParseResume(
       customInformation: currentProfile?.customInformation || [],
       skills: pickNonEmpty(parsedData.skills, currentProfile?.skills),
       certifications: currentProfile?.certifications || [],
-      resume: {
-        fileName,
-        fileData,
-        fileType,
-        parsedText: rawText,
-        uploadDate: new Date().toISOString()
-      }
+      // resume 继续保留为旧版本兼容入口；新功能使用 resumes 简历库。
+      resume,
+      resumes: [...getResumeLibrary(currentProfile || {}), resume],
     };
 
     const saved = await StorageService.saveUserProfile(updatedProfile);

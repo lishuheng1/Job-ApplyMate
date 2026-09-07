@@ -79,6 +79,16 @@ function validateUserProfile(value: unknown): value is UserProfile {
       if (typeof value.resume[field] !== 'string') return false;
     }
   }
+  if (value.resumes !== undefined) {
+    if (!validateObjectArray(value.resumes, [
+      'id', 'category', 'fileName', 'fileData', 'fileType', 'parsedText', 'uploadDate',
+    ])) return false;
+    for (const resume of value.resumes) {
+      for (const field of ['id', 'category', 'fileName', 'fileData', 'fileType', 'uploadDate']) {
+        if (typeof resume[field] !== 'string') return false;
+      }
+    }
+  }
   return true;
 }
 
@@ -244,7 +254,10 @@ export function createBackupSummary(document: BackupDocument): BackupSummary {
     exportedAt: document.exportedAt,
     extensionVersion: document.source.extensionVersion,
     hasUserProfile: document.data.userProfile !== null,
-    hasResumeFile: Boolean(document.data.userProfile?.resume?.fileData),
+    hasResumeFile: Boolean(
+      document.data.userProfile?.resume?.fileData
+      || document.data.userProfile?.resumes?.some(resume => resume.fileData),
+    ),
     hasLLMConfig: document.data.llmConfig !== null,
     hasApiKey: Boolean(document.data.llmConfig?.apiKey),
     hasWebDAVConfig: Boolean(document.webdavConfig?.serverUrl),

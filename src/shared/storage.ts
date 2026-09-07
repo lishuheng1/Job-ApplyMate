@@ -9,6 +9,7 @@ import type {
 import type { LLMConfig } from '../services/llm/types';
 import { normalizeApplicationRecords } from './applicationRecords.ts';
 import { normalizeWebDAVServerUrl } from '../services/webdav.ts';
+import { normalizeResumeLibrary } from './resumes.ts';
 
 export const STORAGE_KEYS = {
   USER_PROFILE: 'userProfile',
@@ -33,6 +34,7 @@ export function normalizeUserProfile(profile: UserProfile): UserProfile {
     projects: profile.projects || [],
     skills: profile.skills || [],
     certifications: profile.certifications || [],
+    resumes: normalizeResumeLibrary(profile),
   } as UserProfile;
 }
 

@@ -131,6 +131,7 @@ function App() {
   });
   const [dataRevision, setDataRevision] = useState(0);
   const [parsingResume, setParsingResume] = useState(false);
+  const [resumeCategory, setResumeCategory] = useState('');
   const [resumeNotice, setResumeNotice] = useState<{
     type: 'info' | 'success' | 'warning' | 'error';
     text: string;
@@ -268,6 +269,30 @@ function App() {
     });
   };
 
+  const updateResumeCategory = (id: string, category: string) => {
+    setProfile(current => ({
+      ...current,
+      resumes: (current.resumes || []).map(resume => (
+        resume.id === id ? { ...resume, category } : resume
+      )),
+    }));
+  };
+
+  const removeResume = (id: string) => {
+    const removed = (profile.resumes || []).find(resume => resume.id === id);
+    if (!removed || !window.confirm(`确认删除“${removed.category || '未分类'}｜${removed.fileName}”吗？`)) return;
+    setProfile(current => {
+      const resumes = (current.resumes || []).filter(resume => resume.id !== id);
+      const legacyWasRemoved = current.resume?.fileData === removed.fileData
+        && current.resume?.fileName === removed.fileName;
+      return {
+        ...current,
+        resumes,
+        resume: legacyWasRemoved ? resumes[0] : current.resume,
+      };
+    });
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -291,6 +316,7 @@ function App() {
             file: base64Data,
             fileType,
             fileName: file.name,
+            category: resumeCategory.trim() || '未分类',
             rawText,
           }
         });
@@ -326,6 +352,7 @@ function App() {
           }
 
           loadProfile();
+          setResumeCategory('');
         } else {
           const message = response.error || '未知错误';
           setSaveNotice({ type: 'error', text: '简历解析失败，请重试' });
@@ -406,7 +433,7 @@ function App() {
             onClick={() => setActiveTab('resume')}
             className={activeTab === 'resume' ? 'options-tab active' : 'options-tab'}
           >
-            简历上传
+            简历库
           </button>
           <button
             onClick={() => setActiveTab('ai')}
@@ -681,7 +708,19 @@ function App() {
 
           {activeTab === 'resume' && (
             <div className="options-form">
-              <h2 className="section-title">上传简历</h2>
+              <h2 className="section-title">简历库</h2>
+
+              <label className="resume-category-field">
+                <span>本次添加到哪个分类</span>
+                <input
+                  type="text"
+                  value={resumeCategory}
+                  onChange={event => setResumeCategory(event.target.value)}
+                  placeholder="例如：产品岗、运营岗、数据分析岗"
+                  maxLength={40}
+                />
+                <small>分类仅用于插件内区分，上传到网站时仍保留文件的原始名称。</small>
+              </label>
 
               <div className="upload-container">
                 <div className={parsingResume ? 'upload-area parsing' : 'upload-area'}>
@@ -716,28 +755,42 @@ function App() {
                   </div>
                 )}
 
-                {profile.resume && (
+                {(profile.resumes || []).length > 0 && (
                   <div className="resume-info">
-                    <h3>已上传的简历</h3>
-                    <div className="resume-item">
-                      <svg
-                        width="24"
-                        height="24"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                        <polyline points="14 2 14 8 20 8"></polyline>
-                      </svg>
-                      <span>{profile.resume.fileName}</span>
+                    <h3>已保存 {profile.resumes?.length || 0} 份简历</h3>
+                    <div className="resume-library-list">
+                      {(profile.resumes || []).map(resume => (
+                        <article className="resume-library-item" key={resume.id}>
+                          <div className="resume-file-icon" aria-hidden="true">
+                            {resume.fileType.toUpperCase().slice(0, 4)}
+                          </div>
+                          <div className="resume-library-main">
+                            <input
+                              type="text"
+                              value={resume.category}
+                              onChange={event => updateResumeCategory(resume.id, event.target.value)}
+                              placeholder="未分类"
+                              aria-label={`${resume.fileName}的分类`}
+                              maxLength={40}
+                            />
+                            <strong title={resume.fileName}>{resume.fileName}</strong>
+                            <small>添加于 {new Date(resume.uploadDate).toLocaleDateString('zh-CN')}</small>
+                          </div>
+                          <button
+                            type="button"
+                            className="resume-remove-button"
+                            onClick={() => removeResume(resume.id)}
+                          >
+                            删除
+                          </button>
+                        </article>
+                      ))}
                     </div>
                   </div>
                 )}
 
                 <div className="info-note">
-                  上传简历后，系统会自动解析并提取个人信息、教育经历、工作经验等内容。
+                  上传后会新增到简历库，并解析其中的个人信息和经历。修改分类或删除简历后，请点击下方“保存设置”。
                 </div>
               </div>
             </div>

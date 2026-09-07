@@ -13,6 +13,7 @@ import {
 import { extractApplicationPageMetadata } from './applicationRecordMetadata.ts';
 import { createVisualRegionFillController } from './visualRegionFill.ts';
 import { createInfoOverlayController } from './infoOverlay.ts';
+import { resolveResumeSelection } from '../shared/resumes.ts';
 import type {
   DetectedField,
   FocusedFieldWriteResult,
@@ -168,11 +169,11 @@ function initializeDetection() {
 }
 
 // 处理填充按钮点击
-async function handleFillButtonClick(reusePreview = false) {
-  await fillSection('all', { reusePreview });
+async function handleFillButtonClick(reusePreview = false, resumeId?: string | null) {
+  await fillSection('all', { reusePreview, resumeId });
 }
 
-async function handleAIPageFill() {
+async function handleAIPageFill(resumeId?: string | null) {
   const status = showAIRegionStatus('正在扫描整页表单...');
   const requestId = crypto.randomUUID();
   let cancelled = false;
@@ -211,10 +212,21 @@ async function handleAIPageFill() {
       filledCount += await formFiller.fillElementValues(learnedFillItems, () => !cancelled);
       scannedFields = collectPageScanFields();
     }
+    const selectedResume = resolveResumeSelection(response.data, resumeId);
+    const fileInputs = formDetector.findFileInputs();
+    let uploadedResumeCount = 0;
+    if (selectedResume) {
+      for (const fileInput of fileInputs) {
+        await formFiller.uploadResume(fileInput, selectedResume.fileData, selectedResume.fileName);
+        uploadedResumeCount++;
+      }
+    }
     if (scannedFields.length === 0) {
       status.update(
-        filledCount > 0 ? `已使用学习记录填充 ${filledCount} 项` : '未检测到可扫描的空白表单字段',
-        filledCount > 0 ? 'success' : 'warning',
+        filledCount > 0 || uploadedResumeCount > 0
+          ? `已填 ${filledCount} 项${uploadedResumeCount > 0 ? `，上传简历 ${uploadedResumeCount} 处` : ''}`
+          : '未检测到可扫描的空白表单字段',
+        filledCount > 0 || uploadedResumeCount > 0 ? 'success' : 'warning',
       );
       showFailureReview(formFiller.getLastFailures());
       return;
@@ -237,18 +249,10 @@ async function handleAIPageFill() {
       formFiller.markUnresolvedField(candidate.element, candidate.label);
     }
 
-    const fileInputs = formDetector.findFileInputs();
-    if (fileInputs.length > 0 && response.data.resume) {
-      for (const fileInput of fileInputs) {
-        await formFiller.uploadResume(
-          fileInput,
-          response.data.resume.fileData,
-          response.data.resume.fileName,
-        );
-      }
-    }
-
-    status.update(`AI 扫描填充完成：已填 ${filledCount} 项`, 'success');
+    status.update(
+      `AI 扫描填充完成：已填 ${filledCount} 项${uploadedResumeCount > 0 ? `，上传简历 ${uploadedResumeCount} 处` : ''}`,
+      'success',
+    );
     showFailureReview(formFiller.getLastFailures());
   } catch (error) {
     if (cancelled) return;
@@ -262,7 +266,7 @@ async function handleAIPageFill() {
 
 async function fillSection(
   section: FillSection,
-  options: { reusePreview?: boolean } = {},
+  options: { reusePreview?: boolean; resumeId?: string | null } = {},
 ) {
   try {
     // 获取用户资料
@@ -303,8 +307,15 @@ async function fillSection(
 
     const fieldsToFill = filterFieldsBySection(detectedFields, section)
       .filter(field => !getControlValue(field.element) && isLikelyApplicationControl(field.element));
+    const selectedResume = resolveResumeSelection(response.data, options.resumeId);
+    const fileInputs = formDetector.findFileInputs();
 
-    if (fieldsToFill.length === 0 && learnedUnmatchedCount === 0 && formFiller.getLastFailures().length === 0) {
+    if (
+      fieldsToFill.length === 0
+      && learnedUnmatchedCount === 0
+      && formFiller.getLastFailures().length === 0
+      && !(selectedResume && fileInputs.length > 0)
+    ) {
       alert('未检测到可填充的表单字段');
       return;
     }
@@ -313,14 +324,13 @@ async function fillSection(
     await formFiller.fillForm(fieldsToFill, response.data, learnedValues);
 
     // 处理简历文件上传
-    const fileInputs = formDetector.findFileInputs();
-    if (fileInputs.length > 0 && response.data.resume) {
+    if (fileInputs.length > 0 && selectedResume) {
       for (const fileInput of fileInputs) {
         try {
           await formFiller.uploadResume(
             fileInput,
-            response.data.resume.fileData,
-            response.data.resume.fileName
+            selectedResume.fileData,
+            selectedResume.fileName
           );
         } catch (error) {
           console.error('Failed to upload resume to input:', error);
@@ -1027,7 +1037,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'FILL_FORM') {
-    handleFillButtonClick(Boolean(message.payload?.reusePreview)).then(() => {
+    handleFillButtonClick(
+      Boolean(message.payload?.reusePreview),
+      message.payload?.resumeId,
+    ).then(() => {
       sendResponse({ success: true });
     }).catch((error) => {
       sendResponse({ success: false, error: error.message });
@@ -1069,7 +1082,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'START_AI_PAGE_FILL') {
-    handleAIPageFill().then(() => {
+    handleAIPageFill(message.payload?.resumeId).then(() => {
       sendResponse({ success: true });
     }).catch((error) => {
       sendResponse({
