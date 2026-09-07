@@ -314,6 +314,7 @@ export type Message =
   | { type: 'PREVIEW_FILL'; payload?: null }
   | { type: 'UNDO_LAST_FILL'; payload?: null }
   | { type: 'PING_CONTENT'; payload?: null }
+  | { type: 'OPEN_INFO_OVERLAY'; payload?: null }
   | { type: 'ENSURE_CONTENT_SCRIPT'; payload: { tabId: number } }
   | { type: 'GET_LEARNED_FIELD_VALUES'; payload: { domain: string } }
   | { type: 'SAVE_LEARNED_FIELD_VALUE'; payload: { domain: string; entry: LearnedFieldValue } }
@@ -332,6 +333,7 @@ export type Message =
   | { type: 'AI_FILL_VISUAL_REGION'; payload: VisualRegionFillPayload | VisualRegionFillRequestPayload }
   | { type: 'CROP_IMAGE_OFFSCREEN'; payload: { imageDataUrl: string; selectionRect: VisualRegionSelectionRect } }
   | { type: 'WRITE_FOCUSED_FIELD'; payload: { tabId: number; value: string } }
+  | { type: 'WRITE_FOCUSED_FIELD_FROM_PAGE'; payload: { value: string } }
   | { type: 'APPLY_FOCUSED_FIELD'; payload: VisualRegionFillResult }
   | { type: 'GET_RESUME_DATA'; payload?: null }
   | { type: 'GENERATE_ANSWER'; payload: { questionText: string; context?: string; fieldMaxLength?: number; language?: 'zh' | 'en' } }

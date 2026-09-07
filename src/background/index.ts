@@ -236,6 +236,11 @@ export async function handleMessage(
     case 'WRITE_FOCUSED_FIELD':
       return await handleWriteFocusedField(message.payload.tabId, message.payload.value);
 
+    case 'WRITE_FOCUSED_FIELD_FROM_PAGE':
+      return sender.tab?.id
+        ? await handleWriteFocusedField(sender.tab.id, message.payload.value)
+        : { success: true, data: { written: false, reason: 'NO_ACTIVE_TAB' } };
+
     case 'ENSURE_CONTENT_SCRIPT':
       return await ensureContentScriptForTab(message.payload.tabId);
 

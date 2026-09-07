@@ -12,6 +12,7 @@ import {
 } from './controlSemantics';
 import { extractApplicationPageMetadata } from './applicationRecordMetadata.ts';
 import { createVisualRegionFillController } from './visualRegionFill.ts';
+import { createInfoOverlayController } from './infoOverlay.ts';
 import type {
   DetectedField,
   FocusedFieldWriteResult,
@@ -52,6 +53,23 @@ let lastFocusedControl:
   | HTMLTextAreaElement
   | HTMLSelectElement
   | null = null;
+
+const infoOverlayController = createInfoOverlayController({
+  getProfile: async () => {
+    const response = await sendRuntimeMessage<UserProfile>({ type: 'GET_USER_PROFILE' });
+    return response.success && response.data ? response.data : null;
+  },
+  writeValue: async value => {
+    const response = await sendRuntimeMessage<FocusedFieldWriteResult>({
+      type: 'WRITE_FOCUSED_FIELD_FROM_PAGE',
+      payload: { value },
+    });
+    return response.success && response.data
+      ? response.data
+      : { written: false, reason: response.error || 'VALUE_REJECTED' };
+  },
+  openSettings: () => chrome.runtime.openOptionsPage(),
+});
 
 async function getLearnedFieldValues(): Promise<Record<string, LearnedFieldValue>> {
   const response = await sendRuntimeMessage<Record<string, LearnedFieldValue>>({
@@ -101,6 +119,13 @@ function isWritableControl(
 }
 
 async function applyValueToFocusedControl(value: string): Promise<FocusedFieldWriteResult> {
+  // 主页面当前聚焦的是 iframe 时，不使用主页面残留的旧字段，让后台继续到子 frame 查找。
+  if (document.activeElement instanceof HTMLIFrameElement) {
+    return { written: false, reason: 'NO_FOCUSED_FIELD' };
+  }
+  if (!lastFocusedControl && isWritableControl(document.activeElement)) {
+    lastFocusedControl = document.activeElement;
+  }
   if (!lastFocusedControl) {
     return { written: false, reason: 'NO_FOCUSED_FIELD' };
   }
@@ -966,6 +991,15 @@ function showSuccessMessage() {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'PING_CONTENT') {
     sendResponse({ success: true, data: { ready: true } });
+    return true;
+  }
+
+  if (message.type === 'OPEN_INFO_OVERLAY') {
+    infoOverlayController.open().then(() => {
+      sendResponse({ success: true, data: { opened: true } });
+    }).catch(error => {
+      sendResponse({ success: false, error: error instanceof Error ? error.message : '信息浮窗打开失败' });
+    });
     return true;
   }
 

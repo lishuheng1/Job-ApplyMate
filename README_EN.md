@@ -96,7 +96,7 @@ Configure a vision-capable model and select **AI 框选补填**. Click a detecte
 
 ### 6. Use the information panel
 
-Select **打开信息浮窗**, focus an input, textarea, or dropdown on the application page, and then click a value in the panel. If the site rejects direct writing, the value is copied so you can paste it manually.
+Select **打开信息浮窗** to pin the panel directly inside the current application page. You can drag it and its position is remembered. Focus an input, textarea, or dropdown, then click a value in the panel. If the site rejects direct writing, the value is copied so you can paste it manually.
 
 ### 7. Track applications
 

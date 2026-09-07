@@ -16,8 +16,12 @@ const chromeCandidates = [
 const browserPath = chromeCandidates.find(existsSync);
 if (!browserPath) throw new Error('未找到可用于冒烟测试的 Chrome 或 Edge');
 
-const server = createServer((_request, response) => {
+const server = createServer((request, response) => {
   response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  if (request.url === '/frame') {
+    response.end('<!doctype html><html><body><label for="city">现居地</label><input id="city" name="currentAddress"></body></html>');
+    return;
+  }
   response.end(`<!doctype html><html><head><title>Job ApplyMate smoke</title></head><body>
     <form><label for="name">姓名</label><input id="name" name="name" required>
     <label for="email">邮箱</label><input id="email" name="email" type="email" required>
@@ -25,6 +29,7 @@ const server = createServer((_request, response) => {
     <div class="form-item"><label id="custom-label">自定义必答题</label>
       <input id="custom-primary" aria-labelledby="custom-label" aria-required="true">
       <input id="custom-helper" placeholder="请输入" aria-required="true"></div>
+    <iframe id="application-frame" src="/frame"></iframe>
     <div class="form-item"><input id="generic-required-helper" placeholder="请输入" aria-required="true"></div></form>
   </body></html>`);
 });
@@ -68,6 +73,14 @@ async function waitForPageTarget() {
 }
 
 async function evaluate(webSocketUrl, expression) {
+  return sendCdpCommand(webSocketUrl, 'Runtime.evaluate', {
+    expression,
+    returnByValue: true,
+    awaitPromise: true,
+  });
+}
+
+async function sendCdpCommand(webSocketUrl, method, params) {
   const socket = new WebSocket(webSocketUrl);
   await new Promise((resolve, reject) => {
     socket.addEventListener('open', resolve, { once: true });
@@ -83,12 +96,12 @@ async function evaluate(webSocketUrl, expression) {
     });
     socket.send(JSON.stringify({
       id: 1,
-      method: 'Runtime.evaluate',
-      params: { expression, returnByValue: true, awaitPromise: true },
+      method,
+      params,
     }));
   });
   socket.close();
-  return result;
+  return method === 'Runtime.evaluate' ? result : true;
 }
 
 try {
@@ -120,7 +133,7 @@ try {
   }
   const quickFill = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
     await chrome.storage.local.set({ userProfile: {
-      personal: { name: '测试用户', gender: '', birthDate: '', phone: '', email: 'smoke@example.com' },
+      personal: { name: '测试用户', gender: '', birthDate: '', phone: '', email: 'smoke@example.com', currentAddress: '上海市' },
       education: [], experience: [], projects: [], customInformation: [], skills: [], certifications: []
     } });
     const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
@@ -148,6 +161,57 @@ try {
   if (filledValues?.name !== '测试用户' || filledValues?.email !== 'smoke@example.com') {
     throw new Error(`真实浏览器写入结果错误：${JSON.stringify(filledValues)}`);
   }
+  const overlayOpen = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
+    const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
+    if (!tabs[0]?.id) return { success: false, error: '测试页标签不存在' };
+    return chrome.tabs.sendMessage(tabs[0].id, { type: 'OPEN_INFO_OVERLAY' });
+  })()`);
+  if (!overlayOpen?.success) {
+    throw new Error(`网页内信息浮窗打开失败：${JSON.stringify(overlayOpen)}`);
+  }
+  const overlayState = await evaluate(webSocketUrl, `(() => {
+    const host = document.querySelector('#job-applymate-info-overlay-host');
+    const button = host?.shadowRoot?.querySelector('[data-profile-key="personal-name"]');
+    const name = document.querySelector('#name');
+    name.value = '';
+    name.focus();
+    button?.click();
+    return {
+      exists: Boolean(host && button),
+      position: host ? getComputedStyle(host).position : '',
+      zIndex: host ? getComputedStyle(host).zIndex : ''
+    };
+  })()`);
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  const overlayFilledName = await evaluate(webSocketUrl, `document.querySelector('#name')?.value`);
+  const overlayFeedback = await evaluate(webSocketUrl, `(() => {
+    const host = document.querySelector('#job-applymate-info-overlay-host');
+    return {
+      status: host?.shadowRoot?.querySelector('[data-overlay-status]')?.textContent || '',
+      activeElement: document.activeElement?.id || document.activeElement?.tagName || ''
+    };
+  })()`);
+  if (!overlayState?.exists || overlayState.position !== 'fixed' || overlayState.zIndex !== '2147483647' || overlayFilledName !== '测试用户') {
+    throw new Error(`网页内信息浮窗置顶或点击写入失败：${JSON.stringify({ overlayState, overlayFilledName, overlayFeedback })}`);
+  }
+  await evaluate(webSocketUrl, `(() => {
+    const frameInput = document.querySelector('#application-frame')?.contentDocument?.querySelector('#city');
+    const button = document.querySelector('#job-applymate-info-overlay-host')?.shadowRoot?.querySelector('[data-profile-key="personal-currentAddress"]');
+    frameInput?.focus();
+    button?.click();
+  })()`);
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  const iframeFilledCity = await evaluate(webSocketUrl, `document.querySelector('#application-frame')?.contentDocument?.querySelector('#city')?.value`);
+  if (iframeFilledCity !== '上海市') {
+    throw new Error(`信息浮窗未能写入子框架字段：${JSON.stringify(iframeFilledCity)}`);
+  }
+  const overlayRestored = await evaluate(webSocketUrl, `(async () => {
+    const host = document.querySelector('#job-applymate-info-overlay-host');
+    host?.remove();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    return Boolean(host?.isConnected);
+  })()`);
+  if (!overlayRestored) throw new Error('信息浮窗被页面移除后未自动恢复');
   const review = await evaluate(webSocketUrl, `({
     count: document.querySelectorAll('[data-failure-review-item="true"]').length,
     labels: Array.from(document.querySelectorAll('[data-failure-review-label="true"]')).map(item => item.textContent),
@@ -159,17 +223,23 @@ try {
   console.log('✓ content.js 在真实浏览器表单页中成功初始化');
   console.log(`✓ 真实浏览器识别到 ${detection.data.count} 个可填字段`);
   console.log(`✓ 真实浏览器快速填充成功（${quickFill.durationMs}ms）`);
+  console.log('✓ 网页内信息浮窗固定在最高层级，可写入主页面和子框架字段，被移除后会自动恢复');
   console.log('✓ 失败复盘会过滤辅助输入框，并把同一逻辑字段去重为 1 项');
 } finally {
-  await new Promise(resolve => {
-    if (browser.exitCode !== null) {
-      resolve();
-      return;
-    }
-    browser.once('exit', resolve);
+  if (process.platform === 'win32' && browser.pid) {
+    await new Promise(resolve => {
+      const cleanup = spawn('taskkill', ['/pid', String(browser.pid), '/T', '/F'], { stdio: 'ignore' });
+      cleanup.once('exit', resolve);
+      cleanup.once('error', resolve);
+    });
+  } else {
     browser.kill();
-    setTimeout(resolve, 1500);
-  });
+  }
+  await new Promise(resolve => setTimeout(resolve, 2500));
   server.close();
-  rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  try {
+    rmSync(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (error) {
+    console.warn(`测试浏览器临时目录稍后由系统清理：${error instanceof Error ? error.message : String(error)}`);
+  }
 }

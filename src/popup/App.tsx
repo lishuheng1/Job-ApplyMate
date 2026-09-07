@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { MessageService } from '../shared/message';
 import type { FillPreviewItem, Message, MessageResponse, UserProfile } from '../shared/types';
 import type { LLMConfig } from '../services/llm/types';
-import { buildSidepanelUrl } from '../sidepanel/navigation';
 
 const APPLICATION_RECORDS_PAGE = 'src/application-records/index.html';
 
@@ -264,34 +263,17 @@ function App() {
   const handleOpenSidePanel = async () => {
     setOpeningView(true);
     try {
-      await openSidePanelFallbackWindow();
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab.id) throw new Error('没有可用的当前页面');
+      const response = await sendMessageToActiveTab<{ opened: boolean }>(tab.id, {
+        type: 'OPEN_INFO_OVERLAY',
+      });
+      if (!response.success) throw new Error(response.error || '当前页面无法打开信息浮窗');
       window.close();
     } catch (error) {
       alert(error instanceof Error ? error.message : '打开资料窗口失败');
       setOpeningView(false);
     }
-  };
-
-  const openSidePanelFallbackWindow = async () => {
-    const currentWindow = await chrome.windows.getCurrent();
-    const width = 420;
-    const height = Math.max(640, Math.min(900, currentWindow.height || 800));
-    const left = currentWindow.left !== undefined && currentWindow.width !== undefined
-      ? currentWindow.left + Math.max(0, currentWindow.width - width)
-      : undefined;
-    const top = currentWindow.top;
-
-    await chrome.windows.create({
-      url: chrome.runtime.getURL(buildSidepanelUrl({
-        targetWindowId: currentWindow.id,
-      })),
-      type: 'popup',
-      width,
-      height,
-      left,
-      top,
-      focused: true,
-    });
   };
 
   const sendMessageToActiveTab = async <T,>(
