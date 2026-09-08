@@ -70,13 +70,15 @@ test('学校行拆分为学校/专业/学历/起止时间', () => {
       id: undefined,
       school: '北京师范大学',
       major: '理论经济学',
-      degree: '硕士',
+      degree: '硕士研究生',
+      academicDegree: '硕士',
       startDate: '2024-09',
       endDate: '2027-06',
     }
   );
   assert.equal(education[1].school, '中国人民大学');
   assert.equal(education[1].degree, '本科');
+  assert.equal(education[1].academicDegree, '学士');
 });
 
 test('教育经历不收录含「大学」的校园活动描述', () => {

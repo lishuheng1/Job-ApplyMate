@@ -17,9 +17,11 @@ type FieldSpec<T> = {
 const educationFields: FieldSpec<EducationInfo>[] = [
   { key: 'school', label: '学校' },
   { key: 'college', label: '学院' },
-  { key: 'educationType', label: '学历类型' },
+  { key: 'educationType', label: '学习形式' },
   { key: 'major', label: '专业' },
-  { key: 'degree', label: '学历' },
+  { key: 'majorCategory', label: '专业类别' },
+  { key: 'degree', label: '学历层次' },
+  { key: 'academicDegree', label: '学位' },
   { key: 'startDate', label: '入学时间' },
   { key: 'endDate', label: '毕业时间' },
   { key: 'gpa', label: 'GPA / 成绩' },
@@ -69,7 +71,7 @@ export function ProfileSections({
         fields={educationFields}
         workingKey={workingKey}
         onFieldClick={onFieldClick}
-        getTitle={(record, index) => record.school || `教育经历 ${index + 1}`}
+        getTitle={(record, index) => [record.degree, record.school].filter(Boolean).join(' · ') || `教育经历 ${index + 1}`}
       />
       <RecordSection
         title="实习经历"

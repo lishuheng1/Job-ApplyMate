@@ -49,6 +49,9 @@ export class FieldMatcher {
     }
 
     if (/学历类型|学习形式|培养方式|(?:^|\s)(?:education\s*type|study\s*type)(?:$|\s)/.test(primary)) return { fieldType: FieldType.EDUCATION_TYPE, confidence: 1 };
+    if (/专业类别|专业大类|学科类别|学科门类|一级学科|所属专业类|(?:^|\s)(?:major\s*category|discipline\s*category)(?:$|\s)/.test(primary)) return { fieldType: FieldType.MAJOR_CATEGORY, confidence: 1 };
+    if (/学位名称|授予学位|学位|(?:^|\s)(?:academic\s*degree|degree\s*awarded)(?:$|\s)/.test(primary)) return { fieldType: FieldType.ACADEMIC_DEGREE, confidence: 1 };
+    if (/学历层次|教育程度|(?:^|\s)(?:degree\s*level|education\s*level)(?:$|\s)/.test(primary)) return { fieldType: FieldType.DEGREE, confidence: 1 };
     if (/学院|院系|系别|(?:^|\s)(?:college|department|faculty|school\s*of)(?:$|\s)/.test(primary)) return { fieldType: FieldType.COLLEGE, confidence: 0.98 };
     if (/学校|院校|大学|(?:^|\s)(?:school|university|alma)(?:$|\s)/.test(primary)) return { fieldType: FieldType.SCHOOL, confidence: 0.98 };
     if (/身份证|证件号|(?:^|\s)(?:id\s*card|identity\s*card|id\s*number)(?:$|\s)/.test(primary)) return { fieldType: FieldType.ID_CARD, confidence: 0.98 };

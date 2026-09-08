@@ -565,11 +565,14 @@ function collectControlOptions(
       .filter(Boolean);
   }
 
-  if (label === '学历类型' || name === 'education_type') {
+  if (label === '学历类型' || label === '学习形式' || name === 'education_type') {
     return ['海外及港澳台', '统招全日制', '统招非全日制', '自考', '其他'];
   }
   if (label === '学历' || name === 'degree') {
-    return ['高中', '专科', '本科', '硕士', '博士'];
+    return ['高中', '专科', '本科', '硕士研究生', '博士研究生'];
+  }
+  if (label.includes('学位') || name === 'academic_degree') {
+    return ['无', '学士', '硕士', '博士'];
   }
 
   return [];

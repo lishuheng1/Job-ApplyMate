@@ -35,11 +35,38 @@ function normalizeEducation(
     college: value.college || '',
     educationType: value.educationType || '',
     major: value.major || '',
-    degree: value.degree || '',
+    majorCategory: value.majorCategory || '',
+    degree: normalizeEducationLevel(value.degree),
+    academicDegree: value.academicDegree || inferAcademicDegree(value.degree),
     startDate: value.startDate || '',
     endDate: value.endDate || '',
     gpa: value.gpa || '',
     ranking: value.ranking || '',
+  };
+}
+
+function inferAcademicDegree(degree?: string): string {
+  if (/博士/.test(degree || '')) return '博士';
+  if (/硕士|研究生/.test(degree || '')) return '硕士';
+  if (/本科|学士/.test(degree || '')) return '学士';
+  return '';
+}
+
+function normalizeEducationLevel(degree?: string): string {
+  const value = degree || '';
+  if (/博士/.test(value) && !/博士后/.test(value)) return '博士研究生';
+  if (/硕士|研究生|MBA|EMBA/i.test(value)) return '硕士研究生';
+  if (/本科|学士/.test(value)) return '本科';
+  return value;
+}
+
+function normalizeResumeProfileSnapshot(snapshot: ResumeProfileSnapshot): ResumeProfileSnapshot {
+  return {
+    personal: { ...snapshot.personal },
+    education: (snapshot.education || []).map(normalizeEducation),
+    experience: (snapshot.experience || []).map(normalizeExperience),
+    projects: (snapshot.projects || []).map(normalizeProject),
+    skills: [...(snapshot.skills || [])],
   };
 }
 
@@ -75,13 +102,13 @@ function normalizeProject(
 }
 
 export function createResumeProfileSnapshot(parsed: ParsedResumeData): ResumeProfileSnapshot {
-  return {
+  return normalizeResumeProfileSnapshot({
     personal: { ...(parsed.personal || {}) },
     education: (parsed.education || []).map(normalizeEducation),
     experience: (parsed.experience || []).map(normalizeExperience),
     projects: (parsed.projects || []).map(normalizeProject),
     skills: [...(parsed.skills || [])],
-  };
+  });
 }
 
 export function getResumeLibrary(profile: Pick<UserProfile, 'resume' | 'resumes'>): ResumeVariant[] {
@@ -132,5 +159,6 @@ export function normalizeResumeLibrary(profile: Pick<UserProfile, 'resume' | 're
     ...resume,
     id: resume.id?.trim() || `resume-${index + 1}`,
     category: resume.category?.trim() || '未分类',
+    ...(resume.parsedProfile ? { parsedProfile: normalizeResumeProfileSnapshot(resume.parsedProfile) } : {}),
   }));
 }

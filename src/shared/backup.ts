@@ -51,7 +51,7 @@ function validateResumeProfileSnapshot(value: unknown): boolean {
     'politicalStatus', 'ethnicity', 'hometown', 'currentAddress', 'selfEvaluation',
   ])) return false;
   if (!validateObjectArray(value.education, [
-    'id', 'school', 'college', 'educationType', 'major', 'degree',
+    'id', 'school', 'college', 'educationType', 'major', 'majorCategory', 'degree', 'academicDegree',
     'startDate', 'endDate', 'gpa', 'ranking',
   ])) return false;
   if (!validateObjectArray(value.experience, [
@@ -71,7 +71,7 @@ function validateUserProfile(value: unknown): value is UserProfile {
   ])) return false;
 
   if (!validateOptionalObjectArray(value.education, [
-    'id', 'school', 'college', 'educationType', 'major', 'degree',
+    'id', 'school', 'college', 'educationType', 'major', 'majorCategory', 'degree', 'academicDegree',
     'startDate', 'endDate', 'gpa', 'ranking',
   ])) return false;
   if (!validateOptionalObjectArray(value.experience, [

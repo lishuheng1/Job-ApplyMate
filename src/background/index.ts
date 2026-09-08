@@ -931,7 +931,7 @@ async function handleMatchFieldsLLM(
     const validIndexes = new Set(payload.fields.map(field => String(field.index)));
     const validFieldTypes = new Set([
       'name', 'gender', 'birthDate', 'phone', 'email', 'wechat', 'idCard',
-      'school', 'college', 'educationType', 'major', 'degree', 'gpa',
+      'school', 'college', 'educationType', 'major', 'majorCategory', 'degree', 'academicDegree', 'gpa',
       'selfEvaluation', 'educationStartDate', 'graduationDate', 'company',
       'position', 'startDate', 'endDate', 'description', 'projectName',
       'projectRole', 'projectStartDate', 'projectEndDate', 'projectDescription',

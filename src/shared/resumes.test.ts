@@ -6,6 +6,7 @@ import {
   createResumeVariant,
   getResumeLibrary,
   LEGACY_RESUME_ID,
+  normalizeResumeLibrary,
   resolveResumeSelection,
 } from './resumes.ts';
 
@@ -85,4 +86,23 @@ test('旧简历没有独立资料时继续使用全局资料', () => {
     resume: legacyResume,
   } as any;
   assert.equal(buildProfileForResume(profile, LEGACY_RESUME_ID).personal.name, '旧版用户');
+});
+
+test('旧简历的硕士字段迁移为独立的学历层次和学位', () => {
+  const resumes = normalizeResumeLibrary({
+    resumes: [{
+      ...legacyResume,
+      id: 'old-master',
+      category: '默认简历',
+      parsedProfile: {
+        personal: {},
+        education: [{ id: 'edu-1', school: '新疆大学', major: '能源动力', degree: '硕士', startDate: '', endDate: '' }],
+        experience: [],
+        projects: [],
+        skills: [],
+      },
+    }],
+  });
+  assert.equal(resumes[0]?.parsedProfile?.education[0]?.degree, '硕士研究生');
+  assert.equal(resumes[0]?.parsedProfile?.education[0]?.academicDegree, '硕士');
 });

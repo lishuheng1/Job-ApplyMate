@@ -1,6 +1,6 @@
 import type { DetectedField, FillPreviewItem, LearnedFieldValue, UserProfile } from '../shared/types';
 import { FieldType } from '../shared/types';
-import { GENDER_OPTIONS, DEGREE_OPTIONS } from '../shared/constants';
+import { GENDER_OPTIONS } from '../shared/constants';
 import { adaptDateValue, areEquivalentDates, findDateOptionIndex } from '../utils/dateValue';
 import {
   dropdownValueMatches,
@@ -36,7 +36,9 @@ const EDUCATION_FIELD_TYPES = new Set<FieldType>([
   FieldType.COLLEGE,
   FieldType.EDUCATION_TYPE,
   FieldType.MAJOR,
+  FieldType.MAJOR_CATEGORY,
   FieldType.DEGREE,
+  FieldType.ACADEMIC_DEGREE,
   FieldType.GPA,
   FieldType.EDUCATION_START_DATE,
   FieldType.GRADUATION_DATE,
@@ -240,7 +242,7 @@ export class FormFiller {
     for (const field of orderedFields) {
       try {
         const fieldType = field.fieldType as FieldType;
-        const educationIndex = this.getNextEducationIndex(fieldType, educationIndexes);
+        const educationIndex = this.getEducationIndexForField(field, profile, educationIndexes);
         const experienceIndex = this.getNextExperienceIndex(fieldType, experienceIndexes);
         const projectIndex = this.getNextProjectIndex(fieldType, projectIndexes);
         const signature = this.getFieldSignature(field.element);
@@ -276,7 +278,7 @@ export class FormFiller {
       const value = this.getValueForField(
         fieldType,
         profile,
-        this.getNextEducationIndex(fieldType, educationIndexes),
+        this.getEducationIndexForField(field, profile, educationIndexes),
         this.getNextExperienceIndex(fieldType, experienceIndexes),
         this.getNextProjectIndex(fieldType, projectIndexes),
       );
@@ -323,7 +325,7 @@ export class FormFiller {
       sectionIndexes[section] = index + 1;
 
       const source = section === 'education'
-        ? profile.education[index]
+        ? profile.education[this.resolveEducationIndexForElement(container, profile, index)]
         : profile.experience[index];
       if (!source) continue;
 
@@ -559,6 +561,69 @@ export class FormFiller {
     return index;
   }
 
+  /**
+   * 招聘网站经常固定先放“研究生”再放“本科”，而用户资料的保存顺序未必一致。
+   * 字段或所属卡片明确写出学历层次时，优先按层次选中整条教育经历；没有提示才按顺序回退。
+   */
+  private getEducationIndexForField(
+    field: DetectedField,
+    profile: UserProfile,
+    educationIndexes: Partial<Record<FieldType, number>>,
+  ): number | undefined {
+    const fieldType = field.fieldType as FieldType;
+    const ordinal = this.getNextEducationIndex(fieldType, educationIndexes);
+    if (ordinal === undefined) return undefined;
+    return this.resolveEducationIndexForElement(field.element, profile, ordinal);
+  }
+
+  private resolveEducationIndexForElement(
+    element: Element,
+    profile: UserProfile,
+    fallbackIndex: number,
+  ): number {
+    const hint = this.getEducationLevelHint(element);
+    if (!hint) return fallbackIndex;
+
+    const matches = profile.education
+      .map((education, index) => ({ index, level: this.classifyEducationLevel(`${education.degree} ${education.academicDegree || ''}`) }))
+      .filter(item => item.level === hint);
+    return matches[fallbackIndex]?.index ?? matches[0]?.index ?? fallbackIndex;
+  }
+
+  private getEducationLevelHint(element: Element): string | null {
+    const identifiers = FieldMatcher.extractIdentifiers(
+      element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+    );
+    const direct = this.classifyEducationLevel(
+      `${identifiers.name} ${identifiers.id} ${identifiers.placeholder} ${identifiers.labelText}`,
+    );
+    if (direct) return direct;
+
+    let current: Element | null = element.parentElement;
+    for (let depth = 0; current && depth < 7; depth += 1, current = current.parentElement) {
+      const ownLabels = Array.from(current.children)
+        .filter(child => /^(H[1-6]|LEGEND)$/.test(child.tagName) || child.getAttribute('role') === 'heading')
+        .map(child => child.textContent || '')
+        .join(' ');
+      const text = `${current.getAttribute('aria-label') || ''} ${current.getAttribute('data-form-field-name') || ''} ${ownLabels} ${current.textContent || ''}`.slice(0, 1200);
+      const level = this.classifyEducationLevel(text);
+      if (level) return level;
+    }
+    return null;
+  }
+
+  private classifyEducationLevel(value: string): string | null {
+    const text = value.toLowerCase().replace(/\s+/g, ' ');
+    const levels = [
+      { key: 'phd', pattern: /博士|ph\.?d|doctorate/ },
+      { key: 'master', pattern: /硕士|研究生|master|postgraduate|(?:^|[^a-z])graduate(?:[^a-z]|$)/ },
+      { key: 'bachelor', pattern: /本科|学士|bachelor|undergraduate/ },
+      { key: 'associate', pattern: /大专|专科|associate/ },
+      { key: 'highschool', pattern: /高中|中专|high school/ },
+    ].filter(item => item.pattern.test(text));
+    return levels.length === 1 ? levels[0].key : null;
+  }
+
   private getNextExperienceIndex(
     fieldType: FieldType,
     experienceIndexes: Partial<Record<FieldType, number>>
@@ -631,8 +696,15 @@ export class FormFiller {
       case FieldType.MAJOR:
         return education?.major || null;
 
+      case FieldType.MAJOR_CATEGORY:
+        return education?.majorCategory || null;
+
       case FieldType.DEGREE:
-        return this.normalizeDegree(education?.degree);
+        // 保留用户保存的“硕士研究生/本科”等完整层次；下拉框会再按网站选项匹配同义值。
+        return education?.degree || null;
+
+      case FieldType.ACADEMIC_DEGREE:
+        return education?.academicDegree || this.inferAcademicDegree(education?.degree) || null;
 
       case FieldType.GPA:
         return education?.gpa || null;
@@ -721,6 +793,13 @@ export class FormFiller {
     return '';
   }
 
+  private inferAcademicDegree(degree?: string): string {
+    if (/博士/.test(degree || '')) return '博士';
+    if (/硕士|研究生/.test(degree || '')) return '硕士';
+    if (/本科|学士/.test(degree || '')) return '学士';
+    return '';
+  }
+
   // 标准化性别值
   private normalizeGender(gender: string): string | null {
     if (!gender) return null;
@@ -738,21 +817,6 @@ export class FormFiller {
     }
 
     return gender;
-  }
-
-  // 标准化学历值
-  private normalizeDegree(degree?: string): string | null {
-    if (!degree) return null;
-
-    const degreeLower = degree.toLowerCase();
-
-    for (const values of Object.values(DEGREE_OPTIONS)) {
-      if (values.some((v) => v.toLowerCase() === degreeLower)) {
-        return values[0]; // 返回标准化的中文值
-      }
-    }
-
-    return degree;
   }
 
   // 填充单个字段

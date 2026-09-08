@@ -14,7 +14,7 @@ Job ApplyMate is a Chrome and Edge extension that keeps job-application informat
 
 | Feature | Description |
 |---|---|
-| Profile management | Store personal information, education, work experience, projects, skills, certificates, and custom fields |
+| Profile management | Store personal information, separate undergraduate/graduate education, work experience, projects, skills, certificates, and custom fields |
 | Quick Fill | Detect common recruitment-form fields and fill them from your saved profile |
 | Logical form detection | Treat radio/checkbox groups, split date controls, and repeated experience rows as complete questions instead of unrelated inputs |
 | Smart date adaptation | Adapt year, month, and date values to the format required by the website; `2020.06`, `2020.6`, and `2020-06` are treated as the same month |
@@ -68,6 +68,8 @@ npm run package:extension
 2. Select **设置个人信息** (Profile Settings).
 3. Enter your personal information, education, work experience, projects, and custom values.
 4. Click **保存设置** (Save Settings).
+
+Add undergraduate and graduate education as separate records. Each record keeps its own school, college/department, major, major category/discipline, study mode, education level, academic degree, and dates. When a form explicitly says undergraduate or graduate, the matching record is selected instead of relying only on list order.
 
 AI configuration is optional. Regular profile management, local resume parsing, Quick Fill, the information panel, and JSON import/export work without AI.
 

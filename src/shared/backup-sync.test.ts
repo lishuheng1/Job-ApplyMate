@@ -102,7 +102,11 @@ test('V1 备份可保存多份简历的分类与原文件名', () => {
       uploadDate: '2026-09-07T00:00:00.000Z',
       parsedProfile: {
         personal: { name: '张三' },
-        education: [],
+        education: [{
+          id: 'edu-1', school: '新疆大学', college: '电气工程学院', educationType: '统招全日制',
+          major: '能源动力', majorCategory: '动力工程及工程热物理', degree: '硕士研究生',
+          academicDegree: '硕士', startDate: '2024-09', endDate: '2027-06', gpa: '', ranking: '',
+        }],
         experience: [{ id: 'exp-1', company: '甲公司', position: '产品经理', startDate: '', endDate: '', description: '' }],
         projects: [],
         skills: ['原型设计'],
@@ -124,6 +128,8 @@ test('V1 备份可保存多份简历的分类与原文件名', () => {
   assert.equal(result.document.data.userProfile?.resumes?.[1]?.category, '数据岗');
   assert.equal(result.document.data.userProfile?.resumes?.[1]?.fileName, '张三-数据分析.pdf');
   assert.equal(result.document.data.userProfile?.resumes?.[0]?.parsedProfile?.experience[0]?.position, '产品经理');
+  assert.equal(result.document.data.userProfile?.resumes?.[0]?.parsedProfile?.education[0]?.college, '电气工程学院');
+  assert.equal(result.document.data.userProfile?.resumes?.[0]?.parsedProfile?.education[0]?.majorCategory, '动力工程及工程热物理');
   assert.equal(createBackupSummary(result.document).hasResumeFile, true);
 });
 

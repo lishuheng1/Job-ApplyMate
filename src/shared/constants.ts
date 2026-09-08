@@ -43,9 +43,17 @@ export const FIELD_PATTERNS: Record<string, string[]> = {
     'major', 'specialty', 'discipline', 'subject', '专业', '所学专业',
     '专业名称', 'fieldofstudy', 'field_of_study', 'course'
   ],
+  [FieldType.MAJOR_CATEGORY]: [
+    'majorcategory', 'major_category', 'disciplinecategory', '专业类别',
+    '专业大类', '学科类别', '学科门类', '一级学科', '所属专业类'
+  ],
   [FieldType.DEGREE]: [
-    'degree', 'diploma', 'qualification', '学历', '学位',
+    'degree', 'diploma', 'qualification', '学历', '学历层次',
     '文凭', '教育程度', 'academicqualification'
+  ],
+  [FieldType.ACADEMIC_DEGREE]: [
+    'academicdegree', 'academic_degree', '学位', '学位名称', '授予学位',
+    'degreeawarded', 'degree_awarded'
   ],
   [FieldType.GPA]: [
     'gpa', 'grade', 'score', 'average', '成绩', '绩点', '平均分',

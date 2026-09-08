@@ -6,11 +6,11 @@ interface Props {
   onChange: (items: EducationInfo[]) => void;
 }
 
-const DEGREES = ['博士', '硕士', '本科', '大专', '高中'];
+const DEGREES = ['博士研究生', '硕士研究生', '本科', '大专', '高中'];
 
 /**
  * 教育经历编辑列表。
- * 顺序有实际意义：自动填充会按页面上的教育经历字段顺序依次取用。
+ * 网页明确标注“本科/研究生”时会按学历层次匹配；没有标注时再按这里的顺序取用。
  */
 export function EducationSection({ items, onChange }: Props) {
   const update = (index: number, field: keyof EducationInfo, value: string) => {
@@ -28,7 +28,9 @@ export function EducationSection({ items, onChange }: Props) {
         college: '',
         educationType: '统招全日制',
         major: '',
+        majorCategory: '',
         degree: '',
+        academicDegree: '',
         startDate: '',
         endDate: '',
       },
@@ -51,7 +53,7 @@ export function EducationSection({ items, onChange }: Props) {
     <div>
       <h2 style={styles.sectionTitle}>教育经历</h2>
       <p style={styles.description}>
-        自动填充时会按顺序依次使用教育经历：页面有几组教育字段，就尽量填几条。
+        请为本科、研究生分别添加一条经历。网页标明学历层次时会精确匹配；未标明时按这里的顺序填充。
       </p>
 
       {items.length === 0 && (
@@ -62,7 +64,7 @@ export function EducationSection({ items, onChange }: Props) {
         <div key={item.id || index} style={styles.card}>
           <div style={styles.cardHeader}>
             <span style={styles.cardIndex}>
-              {`经历 ${index + 1}`}
+              {item.degree ? `${item.degree} · 经历 ${index + 1}` : `经历 ${index + 1}`}
             </span>
             <div style={styles.cardActions}>
               <button onClick={() => move(index, -1)} disabled={index === 0} style={styles.iconButton}>上移</button>
@@ -102,11 +104,21 @@ export function EducationSection({ items, onChange }: Props) {
                 placeholder="如 理论经济学"
               />
             </div>
+            <div style={styles.group}>
+              <label style={styles.label}>专业类别 / 一级学科</label>
+              <input
+                type="text"
+                value={item.majorCategory || ''}
+                onChange={e => update(index, 'majorCategory', e.target.value)}
+                style={styles.input}
+                placeholder="如 能源动力类"
+              />
+            </div>
           </div>
 
           <div style={styles.row}>
             <div style={styles.group}>
-              <label style={styles.label}>学历类型</label>
+              <label style={styles.label}>学习形式 / 培养方式</label>
               <select
                 value={item.educationType || ''}
                 onChange={e => update(index, 'educationType', e.target.value)}
@@ -121,7 +133,7 @@ export function EducationSection({ items, onChange }: Props) {
               </select>
             </div>
             <div style={styles.group}>
-              <label style={styles.label}>学历</label>
+              <label style={styles.label}>学历层次</label>
               <select
                 value={item.degree || ''}
                 onChange={e => update(index, 'degree', e.target.value)}
@@ -130,6 +142,16 @@ export function EducationSection({ items, onChange }: Props) {
                 <option value="">请选择</option>
                 {DEGREES.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
+            </div>
+            <div style={styles.group}>
+              <label style={styles.label}>学位</label>
+              <input
+                type="text"
+                value={item.academicDegree || ''}
+                onChange={e => update(index, 'academicDegree', e.target.value)}
+                style={styles.input}
+                placeholder="如 工学硕士 / 工学学士"
+              />
             </div>
             <div style={styles.group}>
               <label style={styles.label}>入学时间</label>

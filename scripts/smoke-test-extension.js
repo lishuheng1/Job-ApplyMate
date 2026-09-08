@@ -28,6 +28,20 @@ const server = createServer((request, response) => {
     <label id="degree-label" for="degree">学历</label>
     <div class="ant-select ant-select-show-search"><input id="degree" name="degree" role="combobox" aria-labelledby="degree-label" aria-controls="degree-list" aria-expanded="false" aria-autocomplete="list" required></div>
     <div id="degree-list" role="listbox" style="display:none;position:absolute;background:white"></div>
+    <fieldset id="graduate-education"><legend>硕士研究生教育经历</legend>
+      <label for="graduate-school">研究生学校</label><input id="graduate-school" name="graduate_school">
+      <label for="graduate-college">研究生学院</label><input id="graduate-college" name="graduate_college">
+      <label for="graduate-major-category">研究生专业类别</label><input id="graduate-major-category" name="graduate_major_category">
+      <label for="graduate-degree">研究生学历层次</label><input id="graduate-degree" name="graduate_degree_level">
+      <label for="graduate-academic-degree">研究生学位</label><input id="graduate-academic-degree" name="graduate_academic_degree">
+    </fieldset>
+    <fieldset id="undergraduate-education"><legend>本科教育经历</legend>
+      <label for="undergraduate-school">本科学校</label><input id="undergraduate-school" name="undergraduate_school">
+      <label for="undergraduate-college">本科院系</label><input id="undergraduate-college" name="undergraduate_college">
+      <label for="undergraduate-major-category">本科专业类别</label><input id="undergraduate-major-category" name="undergraduate_major_category">
+      <label for="undergraduate-degree">本科学历层次</label><input id="undergraduate-degree" name="undergraduate_degree_level">
+      <label for="undergraduate-academic-degree">本科学位</label><input id="undergraduate-academic-degree" name="undergraduate_academic_degree">
+    </fieldset>
     <label for="resume">上传简历</label><input id="resume" name="resume" type="file" accept=".pdf">
     <label for="intro">请介绍你自己</label><textarea id="intro" name="intro"></textarea>
     <div class="form-item"><label id="custom-label">自定义必答题</label>
@@ -195,7 +209,10 @@ try {
         } },
         { id: 'resume-operations', category: '运营岗', fileName: '运营岗位定制版.pdf', fileData: 'data:application/pdf;base64,JVBERi0xLjQ=', fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z', parsedProfile: {
           personal: { name: '运营版用户', email: 'operations@example.com', currentAddress: '深圳市' },
-          education: [{ id: 'operations-edu', school: '', college: '', major: '', degree: '本科', educationType: '', startDate: '', endDate: '', gpa: '' }], experience: [], projects: [], skills: []
+          education: [
+            { id: 'operations-undergraduate', school: '山东科技大学', college: '智能装备学院', major: '过程装备与控制工程', majorCategory: '机械类', degree: '本科', academicDegree: '工学学士', educationType: '统招全日制', startDate: '2020-09', endDate: '2024-06', gpa: '' },
+            { id: 'operations-graduate', school: '新疆大学', college: '电气工程学院', major: '能源动力', majorCategory: '动力工程及工程热物理', degree: '硕士研究生', academicDegree: '工程硕士', educationType: '统招全日制', startDate: '2024-09', endDate: '2027-06', gpa: '' }
+          ], experience: [], projects: [], skills: []
         } }
       ]
     } });
@@ -225,10 +242,25 @@ try {
     degreeExpanded: document.querySelector('#degree')?.getAttribute('aria-expanded'),
     degreeOptions: Array.from(document.querySelectorAll('#degree-list [role="option"]')).map(option => ({ text: option.textContent, selected: option.getAttribute('aria-selected') })),
     degreeListDisplay: getComputedStyle(document.querySelector('#degree-list')).display,
+    graduateSchool: document.querySelector('#graduate-school')?.value,
+    graduateCollege: document.querySelector('#graduate-college')?.value,
+    graduateMajorCategory: document.querySelector('#graduate-major-category')?.value,
+    graduateDegree: document.querySelector('#graduate-degree')?.value,
+    graduateAcademicDegree: document.querySelector('#graduate-academic-degree')?.value,
+    undergraduateSchool: document.querySelector('#undergraduate-school')?.value,
+    undergraduateCollege: document.querySelector('#undergraduate-college')?.value,
+    undergraduateMajorCategory: document.querySelector('#undergraduate-major-category')?.value,
+    undergraduateDegree: document.querySelector('#undergraduate-degree')?.value,
+    undergraduateAcademicDegree: document.querySelector('#undergraduate-academic-degree')?.value,
     resumeName: document.querySelector('#resume')?.files?.[0]?.name || '',
     failureLabels: Array.from(document.querySelectorAll('[data-failure-review-label="true"]')).map(item => item.textContent)
   })`);
-  if (filledValues?.name !== '运营版用户' || filledValues?.email !== 'operations@example.com' || filledValues?.degree !== '大学本科' || filledValues?.resumeName !== '运营岗位定制版.pdf') {
+  if (filledValues?.name !== '运营版用户' || filledValues?.email !== 'operations@example.com' || filledValues?.degree !== '大学本科' || filledValues?.resumeName !== '运营岗位定制版.pdf'
+    || filledValues?.graduateSchool !== '新疆大学' || filledValues?.graduateCollege !== '电气工程学院'
+    || filledValues?.graduateMajorCategory !== '动力工程及工程热物理' || filledValues?.graduateDegree !== '硕士研究生'
+    || filledValues?.graduateAcademicDegree !== '工程硕士' || filledValues?.undergraduateSchool !== '山东科技大学'
+    || filledValues?.undergraduateCollege !== '智能装备学院' || filledValues?.undergraduateMajorCategory !== '机械类'
+    || filledValues?.undergraduateDegree !== '本科' || filledValues?.undergraduateAcademicDegree !== '工学学士') {
     runtimeDiagnostics.close();
     throw new Error(`真实浏览器写入结果错误：${JSON.stringify({ quickFill, filledValues, runtimeMessages: runtimeDiagnostics.messages })}`);
   }
@@ -386,6 +418,7 @@ try {
   console.log(`✓ 真实浏览器识别到 ${detection.data.count} 个可填字段`);
   console.log(`✓ 真实浏览器快速填充成功（${quickFill.durationMs}ms）`);
   console.log('✓ 动态下拉框会等待选项加载，并把“本科”安全匹配为“大学本科”');
+  console.log('✓ 本科与研究生会按学历层次匹配各自的学校、学院、专业类别和学位');
   console.log('✓ AI 服务不可用时仍会保留停止前已经完成的本地填写结果');
   console.log('✓ 可按分类选择指定简历上传，也可明确选择本次不上传');
   console.log('✓ 网页内信息浮窗固定在最高层级，可写入主页面和子框架字段，被移除后会自动恢复');

@@ -91,7 +91,9 @@ export function buildResumeParsingPrompt(rawText: string): { system: string; use
       "college": "学院/院系",
       "educationType": "学历类型/学习形式（如统招全日制、统招非全日制、海外及港澳台、自考、其他）",
       "major": "专业",
-      "degree": "学历(高中/专科/本科/硕士/博士)",
+      "majorCategory": "专业类别/一级学科（如能源动力类、动力工程及工程热物理）",
+      "degree": "学历层次(高中/专科/本科/硕士研究生/博士研究生)",
+      "academicDegree": "学位（如学士/硕士/博士，原文没有则留空）",
       "startDate": "YYYY-MM",
       "endDate": "YYYY-MM",
       "gpa": "GPA或绩点"
@@ -129,6 +131,8 @@ export function buildResumeParsingPrompt(rawText: string): { system: string; use
 - 原文来自PDF/Word提取，同一句话可能被硬换行拆到多行，请自行拼回完整句子
 - 个人信息常无标签并排写在开头（如"中共党员 2002年5月"），需按取值本身判断字段归属
 - 学校行常把学校、专业、学历、起止时间写在一行，需拆分到对应字段，不要整行填进school
+- 本科与研究生必须拆成两条独立教育经历；college、major、majorCategory、degree、academicDegree 均只能属于各自学校，不得混用
+- “学历层次”和“学位”不是同一字段，例如本科对应学历层次“本科”、学位“学士”；硕士研究生对应学历层次“硕士研究生”、学位“硕士”
 - 公司名不一定含"公司/集团"（如"科大讯飞""美团快驴""BOSS直聘"），按机构名识别
 - description保留该条经历下的完整工作内容，不要压缩成一句话
 - 简历中确实没有的信息（如未写性别）必须留空，不得由姓名或其他字段推断`;
@@ -145,7 +149,7 @@ export function buildFieldMatchingPrompt(
 ): { system: string; user: string } {
   const fieldTypes = [
     'name', 'gender', 'birthDate', 'phone', 'email', 'wechat', 'idCard',
-    'selfEvaluation', 'school', 'college', 'educationType', 'major', 'degree', 'gpa', 'educationStartDate', 'graduationDate',
+    'selfEvaluation', 'school', 'college', 'educationType', 'major', 'majorCategory', 'degree', 'academicDegree', 'gpa', 'educationStartDate', 'graduationDate',
     'company', 'position', 'startDate', 'endDate', 'description', 'skills',
     'projectName', 'projectRole', 'projectStartDate', 'projectEndDate',
     'projectDescription', 'projectAchievements', 'projectTechnologies',

@@ -182,7 +182,7 @@ export class NLPHelper {
    * 而不是依赖位置切分。
    */
   static parseEducationSection(lines: string[]): Partial<EducationInfo>[] {
-    const degreeRegex = /(博士后|博士|硕士|研究生|本科|学士|大专|专科|高中|中专|MBA|EMBA)/;
+    const degreeRegex = /(博士后|博士研究生|博士|硕士研究生|硕士|研究生|本科|学士|大专|专科|高中|中专|MBA|EMBA)/;
     const schoolRegex = /(大学|学院|学校|University|College|Institute|School)/i;
     const entries: Partial<EducationInfo>[] = [];
 
@@ -199,7 +199,9 @@ export class NLPHelper {
       let school = '';
       let college = '';
       let major = '';
+      let majorCategory = '';
       let degree = '';
+      let academicDegree = '';
       let gpa = '';
 
       for (const part of parts) {
@@ -209,7 +211,19 @@ export class NLPHelper {
           continue;
         }
         if (!degree && degreeRegex.test(part) && part.length <= 8) {
-          degree = (part.match(degreeRegex) as RegExpMatchArray)[1];
+          const rawDegree = (part.match(degreeRegex) as RegExpMatchArray)[1];
+          if (/博士/.test(rawDegree) && rawDegree !== '博士后') {
+            degree = '博士研究生';
+            academicDegree = '博士';
+          } else if (/硕士|研究生|MBA|EMBA/.test(rawDegree)) {
+            degree = '硕士研究生';
+            academicDegree = '硕士';
+          } else if (/本科|学士/.test(rawDegree)) {
+            degree = '本科';
+            academicDegree = '学士';
+          } else {
+            degree = rawDegree;
+          }
           const remainder = part.replace(degreeRegex, '').trim();
           if (remainder && !major && /专业/.test(remainder)) major = remainder;
           continue;
@@ -241,12 +255,19 @@ export class NLPHelper {
 
       if (!school) continue;
 
+      const majorCategoryMatch = rest.match(/(?:专业类别|专业大类|学科门类|一级学科)[:：\s]*([^|｜·，,、]{2,30})/);
+      if (majorCategoryMatch) majorCategory = majorCategoryMatch[1].trim();
+      const academicDegreeMatch = rest.match(/(?:学位|授予学位)[:：\s]*([^|｜·，,、\s]{1,12})/);
+      if (academicDegreeMatch) academicDegree = academicDegreeMatch[1].trim();
+
       entries.push({
         id: `edu-${entries.length}`,
         school,
         ...(college ? { college } : {}),
         major,
+        ...(majorCategory ? { majorCategory } : {}),
         degree,
+        ...(academicDegree ? { academicDegree } : {}),
         startDate,
         endDate,
         ...(gpa ? { gpa } : {}),

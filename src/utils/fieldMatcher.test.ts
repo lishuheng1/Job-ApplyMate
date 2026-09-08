@@ -20,6 +20,14 @@ test('学校、学院与学历不再互相覆盖', () => {
   assert.equal(match('degree'), FieldType.DEGREE);
 });
 
+test('专业类别、学历层次与学位分别识别', () => {
+  assert.equal(match('major_category'), FieldType.MAJOR_CATEGORY);
+  assert.equal(match('学历层次'), FieldType.DEGREE);
+  assert.equal(match('graduate_degree_level'), FieldType.DEGREE);
+  assert.equal(match('academic_degree'), FieldType.ACADEMIC_DEGREE);
+  assert.equal(match('授予学位'), FieldType.ACADEMIC_DEGREE);
+});
+
 test('项目经历字段映射到独立项目类型', () => {
   assert.equal(match('name', '项目经历 project'), FieldType.PROJECT_NAME);
   assert.equal(match('project_role', '项目经历'), FieldType.PROJECT_ROLE);

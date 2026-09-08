@@ -38,7 +38,12 @@ export interface EducationInfo {
   college?: string;
   educationType?: string;
   major: string;
+  /** 专业所属大类/一级学科，例如“能源动力类”“动力工程及工程热物理”。 */
+  majorCategory?: string;
+  /** 学历层次，例如“本科”“硕士研究生”。旧数据仍保存在 degree 中。 */
   degree: string;
+  /** 学位，例如“工学学士”“工程硕士”；与学历层次分开保存。 */
+  academicDegree?: string;
   startDate: string;
   endDate: string;
   gpa?: string;
@@ -424,7 +429,9 @@ export enum FieldType {
   COLLEGE = 'college',
   EDUCATION_TYPE = 'educationType',
   MAJOR = 'major',
+  MAJOR_CATEGORY = 'majorCategory',
   DEGREE = 'degree',
+  ACADEMIC_DEGREE = 'academicDegree',
   GPA = 'gpa',
   SELF_EVALUATION = 'selfEvaluation',
   EDUCATION_START_DATE = 'educationStartDate',

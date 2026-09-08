@@ -29,6 +29,9 @@ export function normalizeUserProfile(profile: UserProfile): UserProfile {
       ...education,
       college: education.college || inferCollegeForKnownMockData(education.school, education.major),
       educationType: education.educationType || '统招全日制',
+      majorCategory: education.majorCategory || '',
+      academicDegree: education.academicDegree || inferAcademicDegree(education.degree),
+      degree: normalizeEducationLevel(education.degree),
     })),
     experience: profile.experience || [],
     projects: profile.projects || [],
@@ -36,6 +39,21 @@ export function normalizeUserProfile(profile: UserProfile): UserProfile {
     certifications: profile.certifications || [],
     resumes: normalizeResumeLibrary(profile),
   } as UserProfile;
+}
+
+function inferAcademicDegree(degree?: string): string {
+  if (/博士/.test(degree || '')) return '博士';
+  if (/硕士|研究生/.test(degree || '')) return '硕士';
+  if (/本科|学士/.test(degree || '')) return '学士';
+  return '';
+}
+
+function normalizeEducationLevel(degree?: string): string {
+  const value = degree || '';
+  if (/博士/.test(value) && !/博士后/.test(value)) return '博士研究生';
+  if (/硕士|研究生|MBA|EMBA/i.test(value)) return '硕士研究生';
+  if (/本科|学士/.test(value)) return '本科';
+  return value;
 }
 
 function inferCollegeForKnownMockData(school?: string, major?: string): string {
