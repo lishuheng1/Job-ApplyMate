@@ -106,3 +106,32 @@ test('旧简历的硕士字段迁移为独立的学历层次和学位', () => {
   assert.equal(resumes[0]?.parsedProfile?.education[0]?.degree, '硕士研究生');
   assert.equal(resumes[0]?.parsedProfile?.education[0]?.academicDegree, '硕士');
 });
+
+test('简历解析缺少学院时按学校和学历层次使用手动资料补全', () => {
+  const profile = {
+    personal: { name: '张三' },
+    education: [
+      { id: 'base-undergraduate', school: '山东科技大学', college: '智能装备学院', major: '过程装备与控制工程', majorCategory: '机械类', degree: '本科', academicDegree: '工学学士', startDate: '', endDate: '' },
+      { id: 'base-master', school: '新疆大学', college: '电气工程学院', major: '能源动力', majorCategory: '动力工程及工程热物理', degree: '硕士研究生', academicDegree: '工程硕士', startDate: '', endDate: '' },
+    ],
+    experience: [], projects: [], customInformation: [], skills: [], certifications: [],
+    resumes: [{
+      ...legacyResume,
+      id: 'target',
+      category: '目标岗位',
+      parsedProfile: {
+        personal: {},
+        education: [
+          { id: 'resume-master', school: '新疆大学', college: '', major: '能源动力', degree: '硕士研究生', startDate: '', endDate: '' },
+          { id: 'resume-undergraduate', school: '山东科技大学', college: '', major: '过程装备与控制工程', degree: '本科', startDate: '', endDate: '' },
+        ],
+        experience: [], projects: [], skills: [],
+      },
+    }],
+  } as any;
+  const selected = buildProfileForResume(profile, 'target');
+  assert.equal(selected.education[0]?.college, '电气工程学院');
+  assert.equal(selected.education[0]?.majorCategory, '动力工程及工程热物理');
+  assert.equal(selected.education[1]?.college, '智能装备学院');
+  assert.equal(selected.education[1]?.academicDegree, '工学学士');
+});

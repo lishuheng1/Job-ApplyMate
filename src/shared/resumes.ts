@@ -60,6 +60,34 @@ function normalizeEducationLevel(degree?: string): string {
   return value;
 }
 
+function mergeEducationWithFallback(
+  selectedEducation: EducationInfo[],
+  fallbackEducation: EducationInfo[],
+): EducationInfo[] {
+  if (selectedEducation.length === 0) return fallbackEducation;
+
+  return selectedEducation.map((selected, index) => {
+    const selectedLevel = normalizeEducationLevel(selected.degree);
+    const fallback = fallbackEducation.find(item => (
+      Boolean(selected.school && item.school)
+      && selected.school.trim().toLowerCase() === item.school.trim().toLowerCase()
+    )) || fallbackEducation.find(item => (
+      Boolean(selectedLevel) && normalizeEducationLevel(item.degree) === selectedLevel
+    )) || fallbackEducation[index];
+    if (!fallback) return selected;
+
+    const merged = { ...fallback, ...selected };
+    for (const key of Object.keys(fallback) as Array<keyof EducationInfo>) {
+      const selectedValue = selected[key];
+      if (typeof selectedValue !== 'string' || !selectedValue.trim()) {
+        Object.assign(merged, { [key]: fallback[key] });
+      }
+    }
+    merged.id = selected.id || fallback.id;
+    return merged;
+  });
+}
+
 function normalizeResumeProfileSnapshot(snapshot: ResumeProfileSnapshot): ResumeProfileSnapshot {
   return {
     personal: { ...snapshot.personal },
@@ -146,7 +174,7 @@ export function buildProfileForResume(
   return {
     ...profile,
     personal: { ...profile.personal, ...parsedPersonal },
-    education: selected.parsedProfile.education,
+    education: mergeEducationWithFallback(selected.parsedProfile.education, profile.education),
     experience: selected.parsedProfile.experience,
     projects: selected.parsedProfile.projects,
     skills: selected.parsedProfile.skills,

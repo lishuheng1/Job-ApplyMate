@@ -70,6 +70,7 @@ npm run package:extension
 4. Click **保存设置** (Save Settings).
 
 Add undergraduate and graduate education as separate records. Each record keeps its own school, college/department, major, major category/discipline, study mode, education level, academic degree, and dates. When a form explicitly says undergraduate or graduate, the matching record is selected instead of relying only on list order.
+If a resume did not yield a college, major category, or degree, matching manually maintained education data fills only those missing values without replacing data already parsed from that resume.
 
 AI configuration is optional. Regular profile management, local resume parsing, Quick Fill, the information panel, and JSON import/export work without AI.
 
