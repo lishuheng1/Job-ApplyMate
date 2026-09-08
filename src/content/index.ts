@@ -14,7 +14,7 @@ import { extractApplicationPageMetadata } from './applicationRecordMetadata.ts';
 import { createVisualRegionFillController } from './visualRegionFill.ts';
 import { createInfoOverlayController } from './infoOverlay.ts';
 import { runProgressiveFill } from './progressiveFill.ts';
-import { resolveResumeSelection } from '../shared/resumes.ts';
+import { buildProfileForResume, resolveResumeSelection } from '../shared/resumes.ts';
 import type {
   DetectedField,
   FocusedFieldWriteResult,
@@ -58,9 +58,11 @@ let lastFocusedControl:
   | null = null;
 
 const infoOverlayController = createInfoOverlayController({
-  getProfile: async () => {
+  getProfile: async resumeId => {
     const response = await sendRuntimeMessage<UserProfile>({ type: 'GET_USER_PROFILE' });
-    return response.success && response.data ? response.data : null;
+    return response.success && response.data
+      ? buildProfileForResume(response.data, resumeId)
+      : null;
   },
   writeValue: async value => {
     const response = await sendRuntimeMessage<FocusedFieldWriteResult>({
@@ -205,8 +207,9 @@ async function handleAIPageFill(resumeId?: string | null) {
     if (!response.success || !response.data) {
       throw new Error('请先在插件选项页面中设置个人信息');
     }
+    const fillProfile = buildProfileForResume(response.data, resumeId);
 
-    await formFiller.prepareDynamicSections(response.data, 'all');
+    await formFiller.prepareDynamicSections(fillProfile, 'all');
     formFiller.beginFillSession();
     detectedFields = formDetector.detectFields();
     const initiallyEmptyFields = collectPageScanFields();
@@ -218,13 +221,13 @@ async function handleAIPageFill(resumeId?: string | null) {
     const locallyMatchedFields = detectedFields.filter(field => (
       !getControlValue(field.element) && isLikelyApplicationControl(field.element)
     ));
-    await formFiller.fillForm(locallyMatchedFields, response.data, learnedValues);
+    await formFiller.fillForm(locallyMatchedFields, fillProfile, learnedValues);
     let scannedFields = collectPageScanFields();
     filledCount = Math.max(0, initiallyEmptyFields.length - scannedFields.length);
 
     const learnedFillItems = scannedFields.flatMap(field => {
       const learned = learnedValues[formFiller.getFieldSignature(field.element)];
-      const value = formFiller.getLearnedValue(learned, response.data!);
+      const value = formFiller.getLearnedValue(learned, fillProfile);
       return value ? [{ element: field.element, value }] : [];
     });
     if (learnedFillItems.length > 0) {
@@ -256,6 +259,7 @@ async function handleAIPageFill(resumeId?: string | null) {
       'other',
       scannedFields,
       requestId,
+      resumeId,
       () => !cancelled,
       ({ processedCount, filledCount: aiFilledCount, label }) => {
         status.update(
@@ -314,9 +318,10 @@ async function fillSection(
       alert('请先在插件选项页面中设置个人信息！');
       return;
     }
+    const fillProfile = buildProfileForResume(response.data, options.resumeId);
 
     // 预览刚刚完成且页面结构没有变化时，直接复用预览字段，避免再次扫描整页。
-    const dynamicSectionsChanged = await formFiller.prepareDynamicSections(response.data, section);
+    const dynamicSectionsChanged = await formFiller.prepareDynamicSections(fillProfile, section);
     const reusablePreview = options.reusePreview
       && !dynamicSectionsChanged
       && fillPreviewSnapshot
@@ -336,7 +341,7 @@ async function fillSection(
       .filter(({ element }) => !getControlValue(element) && isLikelyApplicationControl(element))
       .flatMap(({ element }) => {
         const learned = learnedValues[formFiller.getFieldSignature(element)];
-        const value = formFiller.getLearnedValue(learned, response.data!);
+        const value = formFiller.getLearnedValue(learned, fillProfile);
         return value ? [{ element, value }] : [];
       });
     const learnedUnmatchedCount = await formFiller.fillElementValues(learnedUnmatchedItems);
@@ -357,7 +362,7 @@ async function fillSection(
     }
 
     // 填充表单
-    await formFiller.fillForm(fieldsToFill, response.data, learnedValues);
+    await formFiller.fillForm(fieldsToFill, fillProfile, learnedValues);
 
     // 处理简历文件上传
     if (fileInputs.length > 0 && selectedResume) {
@@ -423,6 +428,7 @@ function collectPageScanFields(): ScannedPageField[] {
   const roots: ParentNode[] = [document];
   for (let index = 0; index < roots.length; index++) {
     for (const host of Array.from(roots[index].querySelectorAll('*'))) {
+      if (host.matches('[data-job-applymate-ui], [data-job-applymate-overlay]')) continue;
       if (host.shadowRoot && !roots.includes(host.shadowRoot)) roots.push(host.shadowRoot);
     }
   }
@@ -431,6 +437,11 @@ function collectPageScanFields(): ScannedPageField[] {
       'input:not([type="hidden"]):not([type="file"]):not([type="password"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]):not([type="range"]):not([type="color"]), textarea, select',
     ),
   )).filter(element => {
+    const root = element.getRootNode();
+    if (
+      root instanceof ShadowRoot
+      && root.host.matches('[data-job-applymate-ui], [data-job-applymate-overlay]')
+    ) return false;
     if (!isLogicalChoiceRepresentative(element)) return false;
     const visible = element.getClientRects().length > 0
       || (isChoiceControl(element) && getControlOptions(element).length > 0);
@@ -678,6 +689,7 @@ async function fillPageScanProgressively(
   section: PageScanSection,
   fields: ScannedPageField[],
   requestId: string,
+  resumeId: string | null | undefined,
   shouldContinue: () => boolean,
   onProgress: (progress: { processedCount: number; filledCount: number; label: string }) => void,
 ): Promise<number> {
@@ -696,6 +708,7 @@ async function fillPageScanProgressively(
         type: 'AI_FILL_SECTION',
         payload: {
           requestId,
+          resumeId,
           section,
           domain: window.location.hostname,
           fields: [{
@@ -884,14 +897,40 @@ function showFailureReview(failures: FillFailure[]): void {
   document.getElementById('job-applymate-failure-review')?.remove();
   if (failures.length === 0) return;
 
+  const host = document.createElement('div');
+  host.id = 'job-applymate-failure-review';
+  host.dataset.jobApplymateUi = 'failure-review';
+  host.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:2147483647;width:min(460px,calc(100vw - 36px));max-height:min(680px,calc(100vh - 36px));margin:0;padding:0;border:0;background:transparent;color-scheme:light;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
+  const shadow = host.attachShadow({ mode: 'open' });
+  const style = document.createElement('style');
+  style.textContent = `
+    :host {
+      all: initial !important;
+      position: fixed !important;
+      right: 18px !important;
+      bottom: 18px !important;
+      z-index: 2147483647 !important;
+      width: min(460px, calc(100vw - 36px)) !important;
+      max-height: min(680px, calc(100vh - 36px)) !important;
+      display: block !important;
+      color-scheme: light !important;
+      font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+    }
+    *, *::before, *::after { box-sizing: border-box !important; }
+    section, div, strong, span, button, input, select {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+      text-transform: none !important;
+      letter-spacing: normal !important;
+    }
+    button, input, select { font-size: 13px !important; line-height: 1.4 !important; }
+  `;
   const panel = document.createElement('section');
   const header = document.createElement('div');
   const title = document.createElement('strong');
   const subtitle = document.createElement('span');
   const list = document.createElement('div');
   const skipAll = document.createElement('button');
-  panel.id = 'job-applymate-failure-review';
-  panel.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:1000008;width:min(460px,calc(100vw - 36px));max-height:min(680px,calc(100vh - 36px));display:flex;flex-direction:column;overflow:hidden;border:1px solid #9fded0;border-radius:18px 18px 18px 6px;background:#f8fffd;color:#0b2630;box-shadow:0 24px 70px rgba(7,59,76,.28);font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
+  panel.style.cssText = 'width:100%;max-height:min(680px,calc(100vh - 36px));display:flex;flex-direction:column;overflow:hidden;border:1px solid #9fded0;border-radius:18px 18px 18px 6px;background:#f8fffd;color:#0b2630;box-shadow:0 24px 70px rgba(7,59,76,.28);font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
   header.style.cssText = 'padding:16px 18px 14px;background:linear-gradient(135deg,#073b4c,#0f766e);color:#fff;';
   title.style.cssText = 'display:block;font-size:16px;line-height:1.3;';
   subtitle.textContent = '可以修正后填写并记住，也可以跳过本次。';
@@ -904,7 +943,7 @@ function showFailureReview(failures: FillFailure[]): void {
   let remaining = failures.length;
   const updateTitle = () => {
     title.textContent = `${remaining} 项未能自动填写`;
-    if (remaining === 0) panel.remove();
+    if (remaining === 0) host.remove();
   };
   updateTitle();
   header.append(title, subtitle);
@@ -1002,9 +1041,10 @@ function showFailureReview(failures: FillFailure[]): void {
     list.append(row);
   }
 
-  skipAll.onclick = () => panel.remove();
+  skipAll.onclick = () => host.remove();
   panel.append(header, list, skipAll);
-  document.body.append(panel);
+  shadow.append(style, panel);
+  document.documentElement.append(host);
 }
 
 // 显示成功消息
@@ -1054,10 +1094,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'OPEN_INFO_OVERLAY') {
-    infoOverlayController.open().then(() => {
+    infoOverlayController.open(message.payload?.resumeId).then(() => {
       sendResponse({ success: true, data: { opened: true } });
     }).catch(error => {
       sendResponse({ success: false, error: error instanceof Error ? error.message : '信息浮窗打开失败' });
+    });
+    return true;
+  }
+
+  if (message.type === 'SET_INFO_OVERLAY_RESUME') {
+    infoOverlayController.setResume(message.payload.resumeId).then(() => {
+      sendResponse({ success: true, data: { updated: true } });
+    }).catch(error => {
+      sendResponse({ success: false, error: error instanceof Error ? error.message : '切换悬浮窗简历失败' });
     });
     return true;
   }
@@ -1103,6 +1152,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: '请先保存个人资料' });
         return;
       }
+      const previewProfile = buildProfileForResume(response.data, message.payload?.resumeId);
       detectedFields = formDetector.detectFields();
       fillPreviewSnapshot = {
         fields: [...detectedFields],
@@ -1111,7 +1161,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({
         success: true,
         data: {
-          items: formFiller.buildFillPreview(detectedFields, response.data),
+          items: formFiller.buildFillPreview(detectedFields, previewProfile),
           detectedCount: detectedFields.length,
         },
       });

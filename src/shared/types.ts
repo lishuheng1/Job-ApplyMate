@@ -82,9 +82,19 @@ export interface ResumeInfo {
   uploadDate: string;
 }
 
+export interface ResumeProfileSnapshot {
+  personal: Partial<PersonalInfo>;
+  education: EducationInfo[];
+  experience: ExperienceInfo[];
+  projects: ProjectInfo[];
+  skills: string[];
+}
+
 export interface ResumeVariant extends ResumeInfo {
   id: string;
   category: string;
+  /** 该文件独立解析出的资料，切换简历时用于填充和悬浮窗展示。 */
+  parsedProfile?: ResumeProfileSnapshot;
 }
 
 import type { LLMConfig } from '../services/llm/types';
@@ -317,10 +327,11 @@ export type Message =
   | { type: 'SAVE_USER_PROFILE'; payload: UserProfile }
   | { type: 'PARSE_RESUME'; payload: { file: string; fileType: string; fileName: string; category?: string; rawText?: string } }
   | { type: 'FILL_FORM'; payload?: { reusePreview?: boolean; resumeId?: string | null } | null }
-  | { type: 'PREVIEW_FILL'; payload?: null }
+  | { type: 'PREVIEW_FILL'; payload?: { resumeId?: string | null } | null }
   | { type: 'UNDO_LAST_FILL'; payload?: null }
   | { type: 'PING_CONTENT'; payload?: null }
-  | { type: 'OPEN_INFO_OVERLAY'; payload?: null }
+  | { type: 'OPEN_INFO_OVERLAY'; payload?: { resumeId?: string | null } | null }
+  | { type: 'SET_INFO_OVERLAY_RESUME'; payload: { resumeId?: string | null } }
   | { type: 'ENSURE_CONTENT_SCRIPT'; payload: { tabId: number } }
   | { type: 'GET_LEARNED_FIELD_VALUES'; payload: { domain: string } }
   | { type: 'SAVE_LEARNED_FIELD_VALUE'; payload: { domain: string; entry: LearnedFieldValue } }
@@ -348,6 +359,7 @@ export type Message =
       type: 'AI_FILL_SECTION';
       payload: {
         requestId: string;
+        resumeId?: string | null;
         section: string;
         fields: Array<{
           index: number;

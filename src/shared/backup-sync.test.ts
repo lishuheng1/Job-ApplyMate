@@ -100,6 +100,13 @@ test('V1 备份可保存多份简历的分类与原文件名', () => {
       fileData: 'data:application/pdf;base64,QUJD',
       fileType: 'pdf',
       uploadDate: '2026-09-07T00:00:00.000Z',
+      parsedProfile: {
+        personal: { name: '张三' },
+        education: [],
+        experience: [{ id: 'exp-1', company: '甲公司', position: '产品经理', startDate: '', endDate: '', description: '' }],
+        projects: [],
+        skills: ['原型设计'],
+      },
     },
     {
       id: 'resume-data',
@@ -116,7 +123,20 @@ test('V1 备份可保存多份简历的分类与原文件名', () => {
   assert.equal(result.document.schemaVersion, 1);
   assert.equal(result.document.data.userProfile?.resumes?.[1]?.category, '数据岗');
   assert.equal(result.document.data.userProfile?.resumes?.[1]?.fileName, '张三-数据分析.pdf');
+  assert.equal(result.document.data.userProfile?.resumes?.[0]?.parsedProfile?.experience[0]?.position, '产品经理');
   assert.equal(createBackupSummary(result.document).hasResumeFile, true);
+});
+
+test('拒绝结构非法的简历独立资料', () => {
+  const document = JSON.parse(validJson());
+  document.data.userProfile.resumes = [{
+    id: 'bad-profile', category: '产品岗', fileName: 'resume.pdf', fileData: 'data:application/pdf;base64,QUJD',
+    fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z',
+    parsedProfile: { personal: {}, education: 'not-an-array', experience: [], projects: [], skills: [] },
+  }];
+  const result = parseAndValidateBackup(JSON.stringify(document));
+  assert.equal(result.success, false);
+  if (!result.success) assert.equal(result.error.code, 'INVALID_USER_PROFILE');
 });
 
 test('多简历条目中的文件数据必须为字符串', () => {

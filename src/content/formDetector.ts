@@ -32,6 +32,7 @@ export class FormDetector {
     if (this.discoveredRoots.has(root as Node)) return;
     this.discoveredRoots.add(root as Node);
     for (const element of Array.from(root.querySelectorAll('*'))) {
+      if (element.matches('[data-job-applymate-ui], [data-job-applymate-overlay]')) continue;
       if (!element.shadowRoot || this.searchRoots.includes(element.shadowRoot)) continue;
       this.searchRoots.push(element.shadowRoot);
       this.discoverShadowRoots(element.shadowRoot);
@@ -59,6 +60,11 @@ export class FormDetector {
   private analyzeElement(
     element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
   ): void {
+    const root = element.getRootNode();
+    if (
+      root instanceof ShadowRoot
+      && root.host.matches('[data-job-applymate-ui], [data-job-applymate-overlay]')
+    ) return;
     if (element instanceof HTMLInputElement && [
       'file', 'password', 'reset', 'image', 'range', 'color',
     ].includes(element.type.toLowerCase())) return;
@@ -127,6 +133,9 @@ export class FormDetector {
           for (const node of Array.from(mutation.addedNodes)) {
             if (node.nodeType === Node.ELEMENT_NODE) {
               const element = node as Element;
+              if (element.matches('[data-job-applymate-ui], [data-job-applymate-overlay]')) {
+                continue;
+              }
               if (element.shadowRoot) {
                 if (!this.searchRoots.includes(element.shadowRoot)) this.searchRoots.push(element.shadowRoot);
                 this.discoverShadowRoots(element.shadowRoot);

@@ -47,6 +47,21 @@ const MIME_TO_EXT: Record<string, string> = {
   'text/markdown': 'md',
   'text/plain': 'txt',
 };
+const LOCAL_RESUME_PARSE_TIMEOUT_MS = 30_000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
 
 /**
  * 解析上传文件的类型。优先取文件名扩展名；
@@ -308,7 +323,11 @@ function App() {
       try {
         // PDF 与 DOCX 依赖的库需要 DOM，在设置页（有 DOM）先解析出文本，
         // 后台就无需再触碰这些库
-        const rawText = await preParseInPage(fileType, base64Data);
+        const rawText = await withTimeout(
+          preParseInPage(fileType, base64Data),
+          LOCAL_RESUME_PARSE_TIMEOUT_MS,
+          '本地读取超过 30 秒，请确认文件不是扫描版或损坏文件',
+        );
 
         const response = await MessageService.sendMessage({
           type: 'PARSE_RESUME',
@@ -328,7 +347,7 @@ function App() {
             llmError?: string;
           };
           const summary = summarizeParsed(result.parsedData);
-          setSaveNotice({ type: 'success', text: '简历解析成功，请检查并确认提取的信息' });
+          setSaveNotice({ type: 'success', text: '简历已加入资料库，可在插件中切换使用' });
 
           if (result.llmError) {
             // AI 解析失败会静默回退到正则，必须让用户知道，否则会误以为 AI 生效了
@@ -366,6 +385,17 @@ function App() {
         setParsingResume(false);
         e.target.value = '';
       }
+    };
+    reader.onerror = () => {
+      setParsingResume(false);
+      setSaveNotice({ type: 'error', text: '读取简历失败' });
+      setResumeNotice({ type: 'error', text: `无法读取「${file.name}」，请检查文件是否损坏。` });
+      e.target.value = '';
+    };
+    reader.onabort = () => {
+      setParsingResume(false);
+      setResumeNotice({ type: 'warning', text: `已停止读取「${file.name}」。` });
+      e.target.value = '';
     };
 
     reader.readAsDataURL(file);
@@ -790,7 +820,7 @@ function App() {
                 )}
 
                 <div className="info-note">
-                  上传后会新增到简历库，并解析其中的个人信息和经历。修改分类或删除简历后，请点击下方“保存设置”。
+                  每份简历会独立保存解析资料，切换简历时悬浮窗和自动填写内容会同步切换；新增简历不会覆盖已有资料。修改分类或删除简历后，请点击下方“保存设置”。
                 </div>
               </div>
             </div>

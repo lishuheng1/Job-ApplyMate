@@ -23,6 +23,7 @@ export interface MatchFieldsPayload {
 
 export interface AIFillSectionPayload {
   requestId: string;
+  resumeId?: string | null;
   section: string;
   fields: Array<{
     index: number;

@@ -12,7 +12,8 @@ type FieldItem = { key: string; label: string; value: string };
 type Section = { title: string; groups: Array<{ title?: string; fields: FieldItem[] }> };
 
 export type InfoOverlayController = {
-  open(): Promise<void>;
+  open(resumeId?: string | null): Promise<void>;
+  setResume(resumeId?: string | null): Promise<void>;
   destroy(): void;
 };
 
@@ -28,7 +29,7 @@ export function clampOverlayPosition(
 }
 
 export function createInfoOverlayController(options: {
-  getProfile: () => Promise<UserProfile | null>;
+  getProfile: (resumeId?: string | null) => Promise<UserProfile | null>;
   writeValue: (value: string) => Promise<{ written: boolean; reason?: string }>;
   openSettings: () => void;
 }): InfoOverlayController {
@@ -42,6 +43,7 @@ export function createInfoOverlayController(options: {
   let statusTimer: number | null = null;
   let visible = false;
   let disposed = false;
+  let activeResumeId: string | null | undefined;
 
   const setHostPosition = (position: Position) => {
     if (!host) return;
@@ -98,7 +100,7 @@ export function createInfoOverlayController(options: {
     shadow = host.attachShadow({ mode: 'open' });
     shadow.innerHTML = `<style>${OVERLAY_CSS}</style><main class="panel" aria-label="Job ApplyMate 信息浮窗">
       <header class="header" data-drag-handle>
-        <div class="brand"><span class="brand-mark">✓</span><span><strong>Job ApplyMate</strong><small>网页内固定资料窗</small></span></div>
+        <div class="brand"><span class="brand-mark">✓</span><span><strong>Job ApplyMate</strong><small data-resume-label>默认资料</small></span></div>
         <div class="header-actions">
           <button class="icon-button" type="button" data-settings title="设置个人资料">设置</button>
           <button class="icon-button close-button" type="button" data-close title="关闭">×</button>
@@ -146,6 +148,15 @@ export function createInfoOverlayController(options: {
   const renderProfile = (profile: UserProfile | null) => {
     const content = shadow?.querySelector<HTMLElement>('[data-overlay-content]');
     if (!content) return;
+    const resumeLabel = shadow?.querySelector<HTMLElement>('[data-resume-label]');
+    const selectedResume = activeResumeId
+      ? profile?.resumes?.find(resume => resume.id === activeResumeId)
+      : undefined;
+    if (resumeLabel) {
+      resumeLabel.textContent = selectedResume
+        ? `${selectedResume.category} · ${selectedResume.fileName}`
+        : '默认资料';
+    }
     content.replaceChildren();
     if (!profile) {
       const empty = document.createElement('div');
@@ -228,8 +239,9 @@ export function createInfoOverlayController(options: {
     }
   };
 
-  const open = async () => {
+  const open = async (resumeId?: string | null) => {
     if (disposed) return;
+    activeResumeId = resumeId;
     ensureHost();
     if (!host) return;
     visible = true;
@@ -241,7 +253,13 @@ export function createInfoOverlayController(options: {
     } else {
       setHostPosition({ left: window.innerWidth - Math.min(PANEL_WIDTH, window.innerWidth - EDGE_GAP * 2) - 20, top: 90 });
     }
-    renderProfile(await options.getProfile());
+    renderProfile(await options.getProfile(activeResumeId));
+  };
+
+  const setResume = async (resumeId?: string | null) => {
+    if (disposed) return;
+    activeResumeId = resumeId;
+    if (visible) renderProfile(await options.getProfile(activeResumeId));
   };
 
   const onResize = () => {
@@ -250,6 +268,15 @@ export function createInfoOverlayController(options: {
     setHostPosition({ left: rect.left, top: rect.top });
   };
   window.addEventListener('resize', onResize);
+  const handleStorageChange = (
+    changes: Record<string, chrome.storage.StorageChange>,
+    areaName: string,
+  ) => {
+    if (visible && areaName === 'local' && changes.userProfile) {
+      void options.getProfile(activeResumeId).then(renderProfile);
+    }
+  };
+  chrome.storage.onChanged.addListener(handleStorageChange);
 
   const observer = new MutationObserver(() => {
     if (visible && host && !host.isConnected) document.documentElement.appendChild(host);
@@ -258,6 +285,7 @@ export function createInfoOverlayController(options: {
 
   const controller: InfoOverlayController = {
     open,
+    setResume,
     destroy() {
       if (disposed) return;
       disposed = true;
@@ -265,6 +293,7 @@ export function createInfoOverlayController(options: {
       if (statusTimer !== null) window.clearTimeout(statusTimer);
       observer.disconnect();
       window.removeEventListener('resize', onResize);
+      chrome.storage.onChanged.removeListener(handleStorageChange);
       host?.remove();
       host = null;
       shadow = null;

@@ -23,7 +23,7 @@ Job ApplyMate is a Chrome and Edge extension that keeps job-application informat
 | AI Page Scan | Match the page as structured form blocks and keep every education, work, or project block bound to one profile record |
 | AI Region Fill | Select a form area and use a vision-capable model to fill only the empty controls in that area |
 | Information panel | Focus a web form control and write one saved profile value at a time; rejected values are copied automatically |
-| Resume library | Store multiple role-specific resumes with their original filenames and internal categories; choose one file or no upload for each fill |
+| Resume library | Store role-specific resumes with independent parsed profiles and original filenames; switching a resume updates overlay data, autofill values, and file upload together |
 | Resume parsing | Import PDF, DOCX, Markdown, TXT, and structured JSON resumes |
 | Application tracker | Create, filter, sort, edit, delete, and import/export application records as CSV |
 | Backup and sync | Versioned JSON import/export and optional conflict-aware WebDAV synchronization |
@@ -73,7 +73,7 @@ AI configuration is optional. Regular profile management, local resume parsing, 
 
 ### 2. Import a resume
 
-Open **简历库** (Resume Library) in Settings, enter an internal category such as Product or Operations, and add a PDF, DOCX, Markdown, TXT, or structured JSON file. Job ApplyMate preserves the original filename. You can store, recategorize, and delete multiple resumes. Review the parsed information and save the profile before filling forms.
+Open **简历库** (Resume Library) in Settings, enter an internal category such as Product or Operations, and add a PDF, DOCX, Markdown, TXT, or structured JSON file. Job ApplyMate preserves the original filename and stores an independent parsed profile for every resume, so adding a new file no longer overwrites existing profile data. AI parsing falls back to local rules after 45 seconds instead of remaining stuck. Choose a resume in the popup to switch the information overlay, Quick Fill, AI Fill, and uploaded file together.
 
 ### 3. Fill an application form
 

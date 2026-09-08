@@ -22,7 +22,7 @@ const server = createServer((request, response) => {
     response.end('<!doctype html><html><body><label for="city">现居地</label><input id="city" name="currentAddress"></body></html>');
     return;
   }
-  response.end(`<!doctype html><html><head><title>Job ApplyMate smoke</title></head><body>
+  response.end(`<!doctype html><html><head><title>Job ApplyMate smoke</title><style>button,input,select,strong,span{font-size:42px!important;line-height:3!important}</style></head><body>
     <form><label for="name">姓名</label><input id="name" name="name" required>
     <label for="email">邮箱</label><input id="email" name="email" type="email" required>
     <label id="degree-label" for="degree">学历</label>
@@ -189,13 +189,19 @@ try {
       education: [{ school: '', college: '', major: '', degree: '本科', educationType: '', startDate: '', endDate: '', gpa: '' }], experience: [], projects: [], customInformation: [], skills: [], certifications: [],
       resume: { fileName: '产品经理原名.pdf', fileData: 'data:application/pdf;base64,JVBERi0xLjQ=', fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z' },
       resumes: [
-        { id: 'resume-product', category: '产品岗', fileName: '产品经理原名.pdf', fileData: 'data:application/pdf;base64,JVBERi0xLjQ=', fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z' },
-        { id: 'resume-operations', category: '运营岗', fileName: '运营岗位定制版.pdf', fileData: 'data:application/pdf;base64,JVBERi0xLjQ=', fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z' }
+        { id: 'resume-product', category: '产品岗', fileName: '产品经理原名.pdf', fileData: 'data:application/pdf;base64,JVBERi0xLjQ=', fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z', parsedProfile: {
+          personal: { name: '产品版用户', email: 'product@example.com', currentAddress: '北京市' },
+          education: [{ id: 'product-edu', school: '', college: '', major: '', degree: '本科', educationType: '', startDate: '', endDate: '', gpa: '' }], experience: [], projects: [], skills: []
+        } },
+        { id: 'resume-operations', category: '运营岗', fileName: '运营岗位定制版.pdf', fileData: 'data:application/pdf;base64,JVBERi0xLjQ=', fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z', parsedProfile: {
+          personal: { name: '运营版用户', email: 'operations@example.com', currentAddress: '深圳市' },
+          education: [{ id: 'operations-edu', school: '', college: '', major: '', degree: '本科', educationType: '', startDate: '', endDate: '', gpa: '' }], experience: [], projects: [], skills: []
+        } }
       ]
     } });
     const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
     if (!tabs[0]?.id) return { success: false, error: '测试页标签不存在' };
-    const preview = await chrome.tabs.sendMessage(tabs[0].id, { type: 'PREVIEW_FILL' }, { frameId: 0 });
+    const preview = await chrome.tabs.sendMessage(tabs[0].id, { type: 'PREVIEW_FILL', payload: { resumeId: 'resume-operations' } }, { frameId: 0 });
     const startedAt = performance.now();
     const fill = await chrome.tabs.sendMessage(tabs[0].id, {
       type: 'FILL_FORM',
@@ -222,7 +228,7 @@ try {
     resumeName: document.querySelector('#resume')?.files?.[0]?.name || '',
     failureLabels: Array.from(document.querySelectorAll('[data-failure-review-label="true"]')).map(item => item.textContent)
   })`);
-  if (filledValues?.name !== '测试用户' || filledValues?.email !== 'smoke@example.com' || filledValues?.degree !== '大学本科' || filledValues?.resumeName !== '运营岗位定制版.pdf') {
+  if (filledValues?.name !== '运营版用户' || filledValues?.email !== 'operations@example.com' || filledValues?.degree !== '大学本科' || filledValues?.resumeName !== '运营岗位定制版.pdf') {
     runtimeDiagnostics.close();
     throw new Error(`真实浏览器写入结果错误：${JSON.stringify({ quickFill, filledValues, runtimeMessages: runtimeDiagnostics.messages })}`);
   }
@@ -279,7 +285,7 @@ try {
   const overlayOpen = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
     const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
     if (!tabs[0]?.id) return { success: false, error: '测试页标签不存在' };
-    return chrome.tabs.sendMessage(tabs[0].id, { type: 'OPEN_INFO_OVERLAY' });
+    return chrome.tabs.sendMessage(tabs[0].id, { type: 'OPEN_INFO_OVERLAY', payload: { resumeId: 'resume-product' } });
   })()`);
   if (!overlayOpen?.success) {
     throw new Error(`网页内信息浮窗打开失败：${JSON.stringify(overlayOpen)}`);
@@ -306,7 +312,7 @@ try {
       activeElement: document.activeElement?.id || document.activeElement?.tagName || ''
     };
   })()`);
-  if (!overlayState?.exists || overlayState.position !== 'fixed' || overlayState.zIndex !== '2147483647' || overlayFilledName !== '测试用户') {
+  if (!overlayState?.exists || overlayState.position !== 'fixed' || overlayState.zIndex !== '2147483647' || overlayFilledName !== '产品版用户') {
     throw new Error(`网页内信息浮窗置顶或点击写入失败：${JSON.stringify({ overlayState, overlayFilledName, overlayFeedback })}`);
   }
   await evaluate(webSocketUrl, `(() => {
@@ -317,8 +323,22 @@ try {
   })()`);
   await new Promise(resolve => setTimeout(resolve, 1000));
   const iframeFilledCity = await evaluate(webSocketUrl, `document.querySelector('#application-frame')?.contentDocument?.querySelector('#city')?.value`);
-  if (iframeFilledCity !== '上海市') {
+  if (iframeFilledCity !== '北京市') {
     throw new Error(`信息浮窗未能写入子框架字段：${JSON.stringify(iframeFilledCity)}`);
+  }
+  const switchedOverlay = await evaluate(serviceWorker.webSocketDebuggerUrl, `(async () => {
+    const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
+    return chrome.tabs.sendMessage(tabs[0].id, { type: 'SET_INFO_OVERLAY_RESUME', payload: { resumeId: 'resume-operations' } });
+  })()`);
+  const switchedOverlayState = await evaluate(webSocketUrl, `(() => {
+    const shadow = document.querySelector('#job-applymate-info-overlay-host')?.shadowRoot;
+    return {
+      label: shadow?.querySelector('[data-resume-label]')?.textContent || '',
+      name: shadow?.querySelector('[data-profile-key="personal-name"] .field-value')?.textContent || ''
+    };
+  })()`);
+  if (!switchedOverlay?.success || switchedOverlayState?.name !== '运营版用户' || !switchedOverlayState?.label.includes('运营岗')) {
+    throw new Error(`信息浮窗未随简历选择切换：${JSON.stringify({ switchedOverlay, switchedOverlayState })}`);
   }
   const overlayRestored = await evaluate(webSocketUrl, `(async () => {
     const host = document.querySelector('#job-applymate-info-overlay-host');
@@ -349,12 +369,17 @@ try {
   if (singleCloseState?.hostCount !== 1 || singleCloseState.visibleCount !== 0) {
     throw new Error(`悬浮窗重复实例未被正确清理：${JSON.stringify(singleCloseState)}`);
   }
-  const review = await evaluate(webSocketUrl, `({
-    count: document.querySelectorAll('[data-failure-review-item="true"]').length,
-    labels: Array.from(document.querySelectorAll('[data-failure-review-label="true"]')).map(item => item.textContent),
-    title: document.querySelector('#job-applymate-failure-review strong')?.textContent || ''
-  })`);
-  if (review?.count !== 1 || review.labels?.[0] !== '自定义必答题' || !review.title.startsWith('1 项')) {
+  const review = await evaluate(webSocketUrl, `(() => {
+    const shadow = document.querySelector('#job-applymate-failure-review')?.shadowRoot;
+    const input = shadow?.querySelector('input,select');
+    return {
+      count: shadow?.querySelectorAll('[data-failure-review-item="true"]').length || 0,
+      labels: Array.from(shadow?.querySelectorAll('[data-failure-review-label="true"]') || []).map(item => item.textContent),
+      title: shadow?.querySelector('strong')?.textContent || '',
+      inputFontSize: input ? getComputedStyle(input).fontSize : ''
+    };
+  })()`);
+  if (review?.count !== 1 || review.labels?.[0] !== '自定义必答题' || !review.title.startsWith('1 项') || review.inputFontSize !== '13px') {
     throw new Error(`失败复盘过滤或去重错误：${JSON.stringify(review)}`);
   }
   console.log('✓ content.js 在真实浏览器表单页中成功初始化');
@@ -365,6 +390,8 @@ try {
   console.log('✓ 可按分类选择指定简历上传，也可明确选择本次不上传');
   console.log('✓ 网页内信息浮窗固定在最高层级，可写入主页面和子框架字段，被移除后会自动恢复');
   console.log('✓ content.js 即使重复注入，悬浮窗也只有一个实例且关闭一次即可隐藏');
+  console.log('✓ 切换简历会同步切换悬浮窗和自动填写资料');
+  console.log('✓ 失败复盘窗口不会继承招聘网站的大字号样式');
   console.log('✓ 失败复盘会过滤辅助输入框，并把同一逻辑字段去重为 1 项');
   runtimeDiagnostics.close();
 } finally {

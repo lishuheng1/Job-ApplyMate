@@ -44,6 +44,25 @@ function validateOptionalObjectArray(value: unknown, fields: string[]): boolean 
   return value === undefined || validateObjectArray(value, fields);
 }
 
+function validateResumeProfileSnapshot(value: unknown): boolean {
+  if (!isPlainObject(value) || !isPlainObject(value.personal)) return false;
+  if (!hasOnlyStringFields(value.personal, [
+    'name', 'gender', 'birthDate', 'phone', 'email', 'wechat', 'idCard',
+    'politicalStatus', 'ethnicity', 'hometown', 'currentAddress', 'selfEvaluation',
+  ])) return false;
+  if (!validateObjectArray(value.education, [
+    'id', 'school', 'college', 'educationType', 'major', 'degree',
+    'startDate', 'endDate', 'gpa', 'ranking',
+  ])) return false;
+  if (!validateObjectArray(value.experience, [
+    'id', 'company', 'position', 'startDate', 'endDate', 'description', 'achievements',
+  ])) return false;
+  if (!validateObjectArray(value.projects, [
+    'id', 'name', 'role', 'startDate', 'endDate', 'description', 'achievements', 'technologies',
+  ])) return false;
+  return Array.isArray(value.skills) && value.skills.every(item => typeof item === 'string');
+}
+
 function validateUserProfile(value: unknown): value is UserProfile {
   if (!isPlainObject(value) || !isPlainObject(value.personal)) return false;
   if (!hasOnlyStringFields(value.personal, [
@@ -87,6 +106,10 @@ function validateUserProfile(value: unknown): value is UserProfile {
       for (const field of ['id', 'category', 'fileName', 'fileData', 'fileType', 'uploadDate']) {
         if (typeof resume[field] !== 'string') return false;
       }
+      if (
+        resume.parsedProfile !== undefined
+        && !validateResumeProfileSnapshot(resume.parsedProfile)
+      ) return false;
     }
   }
   return true;

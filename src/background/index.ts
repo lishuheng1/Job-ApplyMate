@@ -65,13 +65,19 @@ import {
 } from './visualRegionFill.ts';
 import { areEquivalentDates } from '../utils/dateValue.ts';
 import { ensureContentScriptForTab } from './contentScriptConnection.ts';
-import { createResumeVariant, getResumeLibrary } from '../shared/resumes.ts';
+import {
+  buildProfileForResume,
+  createResumeProfileSnapshot,
+  createResumeVariant,
+  getResumeLibrary,
+} from '../shared/resumes.ts';
 
 // Background Service Worker 入口
 console.log('Background service worker started');
 
 const aiFillControllers = new Map<string, AbortController>();
 const AI_FIELD_TIMEOUT_MS = 25_000;
+const RESUME_PARSE_TIMEOUT_MS = 45_000;
 
 async function queueAutoSync(reason: string): Promise<'disabled' | 'queued'> {
   const config = await StorageService.getWebDAVConfig();
@@ -426,10 +432,11 @@ async function handleAIFillSection(
       return { success: false, error: '请先在设置中配置 AI 服务' };
     }
 
-    const profile = await StorageService.getUserProfile();
-    if (!profile) {
+    const storedProfile = await StorageService.getUserProfile();
+    if (!storedProfile) {
       return { success: false, error: '请先保存个人资料' };
     }
+    const profile = buildProfileForResume(storedProfile, payload.resumeId);
 
     const cacheField = payload.fields.length === 1 ? payload.fields[0] : null;
     const cacheKey = cacheField
@@ -597,7 +604,8 @@ function handleCancelAIFill(requestId: string): MessageResponse {
 // 获取用户资料
 async function handleGetUserProfile(): Promise<MessageResponse<UserProfile>> {
   try {
-    const profile = await StorageService.getUserProfile();
+    const storedProfile = await StorageService.getUserProfile();
+    const profile = storedProfile ? await ensureResumeProfileSnapshots(storedProfile) : null;
     return {
       success: true,
       data: profile || undefined
@@ -608,6 +616,30 @@ async function handleGetUserProfile(): Promise<MessageResponse<UserProfile>> {
       error: error instanceof Error ? error.message : 'Failed to get user profile'
     };
   }
+}
+
+/** 旧版简历库只有 parsedText；升级后用本地规则补齐每份简历的独立资料快照。 */
+async function ensureResumeProfileSnapshots(profile: UserProfile): Promise<UserProfile> {
+  let changed = false;
+  const resumes = getResumeLibrary(profile).map(resume => {
+    if (resume.parsedProfile || !resume.parsedText?.trim()) return resume;
+    try {
+      const migrated = {
+        ...resume,
+        parsedProfile: createResumeProfileSnapshot(NLPHelper.parseResumeText(resume.parsedText)),
+      };
+      changed = true;
+      return migrated;
+    } catch (error) {
+      console.warn(`Failed to migrate parsed profile for ${resume.fileName}:`, error);
+      return resume;
+    }
+  });
+  if (!changed) return profile;
+
+  const migrated = { ...profile, resumes };
+  await StorageService.saveUserProfile(migrated);
+  return migrated;
 }
 
 // 保存用户资料
@@ -651,6 +683,15 @@ function pickNonEmpty<T>(parsed: T[] | undefined, current: T[] | undefined): T[]
   return current || [];
 }
 
+function hasMeaningfulProfileData(profile: UserProfile | null): boolean {
+  if (!profile) return false;
+  return Object.values(profile.personal || {}).some(value => typeof value === 'string' && value.trim())
+    || profile.education.length > 0
+    || profile.experience.length > 0
+    || profile.projects.length > 0
+    || profile.skills.length > 0;
+}
+
 // 解析简历
 async function handleParseResume(
   fileData: string,
@@ -673,14 +714,24 @@ async function handleParseResume(
     } else {
       const llmConfig = await StorageService.getLLMConfig();
       if (llmConfig?.apiKey) {
+        const controller = new AbortController();
+        let timedOut = false;
+        const timeoutId = setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, RESUME_PARSE_TIMEOUT_MS);
         try {
-          parsedData = await parseResumeWithLLM(rawText, llmConfig);
+          parsedData = await parseResumeWithLLM(rawText, llmConfig, controller.signal);
           parseMethod = 'llm';
         } catch (error) {
           // 静默回退会让用户以为 AI 生效了，这里记下原因并回报给界面
-          llmError = error instanceof Error ? error.message : String(error);
+          llmError = timedOut
+            ? 'AI 简历解析超过 45 秒，已自动停止并改用本地规则'
+            : error instanceof Error ? error.message : String(error);
           console.warn('LLM resume parsing failed, falling back to regex:', error);
           parsedData = NLPHelper.parseResumeText(rawText);
+        } finally {
+          clearTimeout(timeoutId);
         }
       } else {
         parsedData = NLPHelper.parseResumeText(rawText);
@@ -698,22 +749,41 @@ async function handleParseResume(
     }, {
       id: `resume-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
       category,
+      parsedProfile: createResumeProfileSnapshot(parsedData),
     });
+    const currentLibrary = getResumeLibrary(currentProfile || {});
+    const shouldSeedDefaultProfile = !hasMeaningfulProfileData(currentProfile)
+      && currentLibrary.length === 0;
+    const baseProfile: UserProfile = currentProfile || {
+      personal: {} as UserProfile['personal'],
+      education: [],
+      experience: [],
+      projects: [],
+      customInformation: [],
+      skills: [],
+      certifications: [],
+    };
     const updatedProfile: UserProfile = {
-      // 解析结果里的空值不能覆盖用户已填的内容
-      personal: {
-        ...(currentProfile?.personal || {}),
-        ...dropEmptyValues(parsedData.personal)
-      } as any,
-      education: pickNonEmpty(parsedData.education, currentProfile?.education) as any,
-      experience: pickNonEmpty(parsedData.experience, currentProfile?.experience) as any,
-      projects: pickNonEmpty(parsedData.projects, currentProfile?.projects) as any,
-      customInformation: currentProfile?.customInformation || [],
-      skills: pickNonEmpty(parsedData.skills, currentProfile?.skills),
-      certifications: currentProfile?.certifications || [],
-      // resume 继续保留为旧版本兼容入口；新功能使用 resumes 简历库。
-      resume,
-      resumes: [...getResumeLibrary(currentProfile || {}), resume],
+      ...baseProfile,
+      // 第一份简历仍可建立初始资料；后续简历只保存自己的快照，不覆盖全局资料。
+      personal: shouldSeedDefaultProfile
+        ? { ...baseProfile.personal, ...dropEmptyValues(parsedData.personal) } as UserProfile['personal']
+        : baseProfile.personal,
+      education: shouldSeedDefaultProfile
+        ? pickNonEmpty(parsedData.education, baseProfile.education) as UserProfile['education']
+        : baseProfile.education,
+      experience: shouldSeedDefaultProfile
+        ? pickNonEmpty(parsedData.experience, baseProfile.experience) as UserProfile['experience']
+        : baseProfile.experience,
+      projects: shouldSeedDefaultProfile
+        ? pickNonEmpty(parsedData.projects, baseProfile.projects) as UserProfile['projects']
+        : baseProfile.projects,
+      skills: shouldSeedDefaultProfile
+        ? pickNonEmpty(parsedData.skills, baseProfile.skills)
+        : baseProfile.skills,
+      // resume 继续保留为旧版本兼容入口，但不再随每次新增而改写。
+      resume: baseProfile.resume || resume,
+      resumes: [...currentLibrary, resume],
     };
 
     const saved = await StorageService.saveUserProfile(updatedProfile);
@@ -759,7 +829,8 @@ async function handleGetResumeData(): Promise<MessageResponse> {
 // LLM 简历解析
 async function parseResumeWithLLM(
   rawText: string,
-  config: LLMConfig
+  config: LLMConfig,
+  signal?: AbortSignal,
 ): Promise<ParsedResumeData> {
   const llm = new LLMService(config);
   const { system, user } = buildResumeParsingPrompt(rawText);
@@ -767,7 +838,7 @@ async function parseResumeWithLLM(
   const result = await llm.chat([
     { role: 'system', content: system },
     { role: 'user', content: user },
-  ], undefined, { temperature: 0 });
+  ], signal, { temperature: 0 });
 
   let jsonStr = result.content.trim();
   if (jsonStr.startsWith('```')) {

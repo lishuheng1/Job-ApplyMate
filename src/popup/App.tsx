@@ -5,6 +5,7 @@ import type { LLMConfig } from '../services/llm/types';
 import { getResumeLibrary } from '../shared/resumes.ts';
 
 const APPLICATION_RECORDS_PAGE = 'src/application-records/index.html';
+const SELECTED_RESUME_STORAGE_KEY = 'jobApplyMateSelectedResumeId';
 
 interface TabMessageSession {
   ready?: boolean;
@@ -80,6 +81,14 @@ function App() {
 
       if (response.success && response.data) {
         setProfile(response.data);
+        const stored = await chrome.storage.local.get(SELECTED_RESUME_STORAGE_KEY);
+        const savedId = stored[SELECTED_RESUME_STORAGE_KEY];
+        setSelectedResumeId(
+          typeof savedId === 'string'
+            && getResumeLibrary(response.data).some(resume => resume.id === savedId)
+            ? savedId
+            : 'none',
+        );
       }
     } catch (error) {
       console.error('Failed to load profile:', error);
@@ -124,6 +133,7 @@ function App() {
       const messageSession: TabMessageSession = {};
       const preview = await sendMessageToActiveTab<FillPreviewResponse>(tab.id, {
         type: 'PREVIEW_FILL',
+        payload: { resumeId: selectedResume?.id || null },
       }, messageSession);
       if (preview.success && preview.data?.items?.length) {
         const lines = preview.data.items.slice(0, 12)
@@ -276,12 +286,28 @@ function App() {
       if (!tab.id) throw new Error('没有可用的当前页面');
       const response = await sendMessageToActiveTab<{ opened: boolean }>(tab.id, {
         type: 'OPEN_INFO_OVERLAY',
+        payload: { resumeId: selectedResume?.id || null },
       });
       if (!response.success) throw new Error(response.error || '当前页面无法打开信息浮窗');
       window.close();
     } catch (error) {
       alert(error instanceof Error ? error.message : '打开资料窗口失败');
       setOpeningView(false);
+    }
+  };
+
+  const handleResumeSelectionChange = async (value: string) => {
+    setSelectedResumeId(value);
+    await chrome.storage.local.set({ [SELECTED_RESUME_STORAGE_KEY]: value });
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab.id) return;
+      await sendMessageToActiveTab(tab.id, {
+        type: 'SET_INFO_OVERLAY_RESUME',
+        payload: { resumeId: value === 'none' ? null : value },
+      });
+    } catch {
+      // 受限页面没有 content script；选择仍已保存，下次打开普通网页会继续使用。
     }
   };
 
@@ -469,7 +495,7 @@ function App() {
               <span>本次简历</span>
               <select
                 value={selectedResumeId}
-                onChange={event => setSelectedResumeId(event.target.value)}
+                onChange={event => void handleResumeSelectionChange(event.target.value)}
                 aria-label="选择本次自动上传的简历"
               >
                 <option value="none">不自动上传简历</option>
