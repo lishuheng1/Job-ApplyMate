@@ -54,6 +54,7 @@ export class FieldMatcher {
     if (/学历层次|教育程度|(?:^|\s)(?:degree\s*level|education\s*level)(?:$|\s)/.test(primary)) return { fieldType: FieldType.DEGREE, confidence: 1 };
     if (/学院|院系|系别|(?:^|\s)(?:college|department|faculty|school\s*of)(?:$|\s)/.test(primary)) return { fieldType: FieldType.COLLEGE, confidence: 0.98 };
     if (/学校|院校|大学|(?:^|\s)(?:school|university|alma)(?:$|\s)/.test(primary)) return { fieldType: FieldType.SCHOOL, confidence: 0.98 };
+    if (/政治面貌|政治状态|政治身份|党派|(?:^|\s)(?:political\s*status|political\s*affiliation)(?:$|\s)/.test(primary)) return { fieldType: FieldType.POLITICAL_STATUS, confidence: 1 };
     if (/身份证|证件号|(?:^|\s)(?:id\s*card|identity\s*card|id\s*number)(?:$|\s)/.test(primary)) return { fieldType: FieldType.ID_CARD, confidence: 0.98 };
     if (educationContext && !workContext) {
       if (isEnd) return { fieldType: FieldType.GRADUATION_DATE, confidence: 0.96 };

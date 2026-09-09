@@ -18,7 +18,7 @@ Job ApplyMate is a Chrome and Edge extension that keeps job-application informat
 | Quick Fill | Detect common recruitment-form fields and fill them from your saved profile |
 | Logical form detection | Treat radio/checkbox groups, split date controls, and repeated experience rows as complete questions instead of unrelated inputs |
 | Smart date adaptation | Adapt year, month, and date values to the format required by the website; `2020.06`, `2020.6`, and `2020-06` are treated as the same month |
-| Reliable dropdown filling | Handle common UI libraries, delayed options, searchable selects, multi-selects, and cascaders; verify the committed value to avoid positive/negative mismatches |
+| Reliable dropdown filling | Handle common UI libraries, delayed options, searchable selects, multi-selects, and cascaders; strictly distinguish political affiliation, positive/negative, and full-time/part-time choices |
 | Failure review and learning | Review fields that could not be filled, correct and remember a value, skip one item, or skip all failures for the current run |
 | AI Page Scan | Match the page as structured form blocks and keep every education, work, or project block bound to one profile record |
 | AI Region Fill | Select a form area and use a vision-capable model to fill only the empty controls in that area |
@@ -77,6 +77,8 @@ AI configuration is optional. Regular profile management, local resume parsing, 
 ### 2. Import a resume
 
 Open **简历库** (Resume Library) in Settings, enter an internal category such as Product or Operations, and add a PDF, DOCX, Markdown, TXT, or structured JSON file. Job ApplyMate preserves the original filename and stores an independent parsed profile for every resume, so adding a new file no longer overwrites existing profile data. AI parsing falls back to local rules after 45 seconds instead of remaining stuck. Choose a resume in the popup to switch the information overlay, Quick Fill, AI Fill, and uploaded file together.
+
+Resume deletion is saved immediately. Adding the exact same source file again updates its existing entry instead of creating a duplicate.
 
 ### 3. Fill an application form
 

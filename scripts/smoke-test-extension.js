@@ -25,6 +25,9 @@ const server = createServer((request, response) => {
   response.end(`<!doctype html><html><head><title>Job ApplyMate smoke</title><style>button,input,select,strong,span{font-size:42px!important;line-height:3!important}</style></head><body>
     <form><label for="name">姓名</label><input id="name" name="name" required>
     <label for="email">邮箱</label><input id="email" name="email" type="email" required>
+    <label for="political-status">政治面貌</label><select id="political-status" name="political_status" required>
+      <option value="">请选择</option><option value="member">中共党员</option><option value="democratic">民主党派</option><option value="probationary">中共预备党员</option><option value="league">共青团员</option>
+    </select>
     <label id="degree-label" for="degree">学历</label>
     <div class="ant-select ant-select-show-search"><input id="degree" name="degree" role="combobox" aria-labelledby="degree-label" aria-controls="degree-list" aria-expanded="false" aria-autocomplete="list" required></div>
     <div id="degree-list" role="listbox" style="display:none;position:absolute;background:white"></div>
@@ -208,7 +211,7 @@ try {
           education: [{ id: 'product-edu', school: '', college: '', major: '', degree: '本科', educationType: '', startDate: '', endDate: '', gpa: '' }], experience: [], projects: [], skills: []
         } },
         { id: 'resume-operations', category: '运营岗', fileName: '运营岗位定制版.pdf', fileData: 'data:application/pdf;base64,JVBERi0xLjQ=', fileType: 'pdf', uploadDate: '2026-09-07T00:00:00.000Z', parsedProfile: {
-          personal: { name: '运营版用户', email: 'operations@example.com', currentAddress: '深圳市' },
+          personal: { name: '运营版用户', email: 'operations@example.com', currentAddress: '深圳市', politicalStatus: '中共预备党员' },
           education: [
             { id: 'operations-undergraduate', school: '山东科技大学', college: '智能装备学院', major: '过程装备与控制工程', majorCategory: '机械类', degree: '本科', academicDegree: '工学学士', educationType: '统招全日制', startDate: '2020-09', endDate: '2024-06', gpa: '' },
             { id: 'operations-graduate', school: '新疆大学', college: '电气工程学院', major: '能源动力', majorCategory: '动力工程及工程热物理', degree: '硕士研究生', academicDegree: '工程硕士', educationType: '统招全日制', startDate: '2024-09', endDate: '2027-06', gpa: '' }
@@ -238,6 +241,8 @@ try {
   const filledValues = await evaluate(webSocketUrl, `({
     name: document.querySelector('#name')?.value,
     email: document.querySelector('#email')?.value,
+    politicalStatus: document.querySelector('#political-status')?.value,
+    politicalStatusText: document.querySelector('#political-status')?.selectedOptions?.[0]?.textContent,
     degree: document.querySelector('#degree')?.value,
     degreeExpanded: document.querySelector('#degree')?.getAttribute('aria-expanded'),
     degreeOptions: Array.from(document.querySelectorAll('#degree-list [role="option"]')).map(option => ({ text: option.textContent, selected: option.getAttribute('aria-selected') })),
@@ -255,7 +260,9 @@ try {
     resumeName: document.querySelector('#resume')?.files?.[0]?.name || '',
     failureLabels: Array.from(document.querySelectorAll('[data-failure-review-label="true"]')).map(item => item.textContent)
   })`);
-  if (filledValues?.name !== '运营版用户' || filledValues?.email !== 'operations@example.com' || filledValues?.degree !== '大学本科' || filledValues?.resumeName !== '运营岗位定制版.pdf'
+  if (filledValues?.name !== '运营版用户' || filledValues?.email !== 'operations@example.com'
+    || filledValues?.politicalStatus !== 'probationary' || filledValues?.politicalStatusText !== '中共预备党员'
+    || filledValues?.degree !== '大学本科' || filledValues?.resumeName !== '运营岗位定制版.pdf'
     || filledValues?.graduateSchool !== '新疆大学' || filledValues?.graduateCollege !== '电气工程学院'
     || filledValues?.graduateMajorCategory !== '动力工程及工程热物理' || filledValues?.graduateDegree !== '硕士研究生'
     || filledValues?.graduateAcademicDegree !== '工程硕士' || filledValues?.undergraduateSchool !== '山东科技大学'
@@ -418,6 +425,7 @@ try {
   console.log(`✓ 真实浏览器识别到 ${detection.data.count} 个可填字段`);
   console.log(`✓ 真实浏览器快速填充成功（${quickFill.durationMs}ms）`);
   console.log('✓ 动态下拉框会等待选项加载，并把“本科”安全匹配为“大学本科”');
+  console.log('✓ 政治面貌会把“中共预备党员”严格匹配到对应选项，不会误选民主党派');
   console.log('✓ 本科与研究生会按学历层次匹配各自的学校、学院、专业类别和学位');
   console.log('✓ AI 服务不可用时仍会保留停止前已经完成的本地填写结果');
   console.log('✓ 可按分类选择指定简历上传，也可明确选择本次不上传');

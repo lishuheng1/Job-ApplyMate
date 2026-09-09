@@ -681,6 +681,9 @@ export class FormFiller {
       case FieldType.ID_CARD:
         return profile.personal.idCard || null;
 
+      case FieldType.POLITICAL_STATUS:
+        return profile.personal.politicalStatus || null;
+
       case FieldType.SELF_EVALUATION:
         return profile.personal.selfEvaluation || null;
 

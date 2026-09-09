@@ -10,6 +10,12 @@ const EQUIVALENT_OPTION_GROUPS = [
   ['本科', '大学本科', '学士', 'bachelor'],
   ['硕士', '研究生', '硕士研究生', 'master'],
   ['博士', '博士研究生', 'phd', 'doctor', 'doctorate'],
+  ['中共党员', '中国共产党党员', '正式党员', '党员'],
+  ['中共预备党员', '中国共产党预备党员', '预备党员'],
+  ['共青团员', '团员'],
+  ['民主党派', '民主党派成员'],
+  ['群众', '普通群众'],
+  ['无党派', '无党派人士'],
   ['应届生', '应届毕业生', '在校生'],
   ['至今', '现在', '目前', 'present', 'current'],
 ];
@@ -48,6 +54,10 @@ export function scoreDropdownOption(desiredValue: string, optionText: string): n
 
   const desiredGroup = equivalentGroup(desiredValue);
   if (desiredGroup >= 0 && desiredGroup === equivalentGroup(optionText)) return 950;
+
+  // 政治面貌是互斥枚举，禁止用“党员/党派”等共有子串做模糊匹配。
+  const politicalPattern = /党员|团员|群众|党派/;
+  if (politicalPattern.test(desired) || politicalPattern.test(option)) return -1;
 
   // Never let a positive answer match a visibly negative option merely because
   // one string contains the other (for example 全日制 / 非全日制, 是 / 是否).

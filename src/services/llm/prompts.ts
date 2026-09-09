@@ -148,7 +148,7 @@ export function buildFieldMatchingPrompt(
   fields: MatchFieldsPayload['fields']
 ): { system: string; user: string } {
   const fieldTypes = [
-    'name', 'gender', 'birthDate', 'phone', 'email', 'wechat', 'idCard',
+    'name', 'gender', 'birthDate', 'phone', 'email', 'wechat', 'idCard', 'politicalStatus',
     'selfEvaluation', 'school', 'college', 'educationType', 'major', 'majorCategory', 'degree', 'academicDegree', 'gpa', 'educationStartDate', 'graduationDate',
     'company', 'position', 'startDate', 'endDate', 'description', 'skills',
     'projectName', 'projectRole', 'projectStartDate', 'projectEndDate',

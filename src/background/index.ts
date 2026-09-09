@@ -70,6 +70,7 @@ import {
   createResumeProfileSnapshot,
   createResumeVariant,
   getResumeLibrary,
+  upsertResumeVariant,
 } from '../shared/resumes.ts';
 
 // Background Service Worker 入口
@@ -783,7 +784,7 @@ async function handleParseResume(
         : baseProfile.skills,
       // resume 继续保留为旧版本兼容入口，但不再随每次新增而改写。
       resume: baseProfile.resume || resume,
-      resumes: [...currentLibrary, resume],
+      resumes: upsertResumeVariant(currentLibrary, resume),
     };
 
     const saved = await StorageService.saveUserProfile(updatedProfile);
@@ -930,7 +931,7 @@ async function handleMatchFieldsLLM(
     const rawMappings: Record<string, unknown> = JSON.parse(jsonStr);
     const validIndexes = new Set(payload.fields.map(field => String(field.index)));
     const validFieldTypes = new Set([
-      'name', 'gender', 'birthDate', 'phone', 'email', 'wechat', 'idCard',
+      'name', 'gender', 'birthDate', 'phone', 'email', 'wechat', 'idCard', 'politicalStatus',
       'school', 'college', 'educationType', 'major', 'majorCategory', 'degree', 'academicDegree', 'gpa',
       'selfEvaluation', 'educationStartDate', 'graduationDate', 'company',
       'position', 'startDate', 'endDate', 'description', 'projectName',

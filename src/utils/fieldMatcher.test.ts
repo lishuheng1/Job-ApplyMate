@@ -28,6 +28,11 @@ test('专业类别、学历层次与学位分别识别', () => {
   assert.equal(match('授予学位'), FieldType.ACADEMIC_DEGREE);
 });
 
+test('政治面貌使用独立字段类型', () => {
+  assert.equal(match('political_status'), FieldType.POLITICAL_STATUS);
+  assert.equal(match('政治面貌'), FieldType.POLITICAL_STATUS);
+});
+
 test('项目经历字段映射到独立项目类型', () => {
   assert.equal(match('name', '项目经历 project'), FieldType.PROJECT_NAME);
   assert.equal(match('project_role', '项目经历'), FieldType.PROJECT_ROLE);

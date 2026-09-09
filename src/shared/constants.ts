@@ -27,6 +27,10 @@ export const FIELD_PATTERNS: Record<string, string[]> = {
     'idcard', 'identitycard', 'identity', '身份证', '身份证号',
     'idnumber', 'cardnumber', '证件号'
   ],
+  [FieldType.POLITICAL_STATUS]: [
+    'politicalstatus', 'political_status', 'politicalaffiliation',
+    '政治面貌', '政治状态', '党派', '政治身份'
+  ],
   [FieldType.SCHOOL]: [
     'school', 'university', '学校', '院校',
     '毕业院校', '就读学校', 'alma'

@@ -13,6 +13,7 @@ import { DataSyncSettings } from './DataSyncSettings';
 import { ApplicationRecordsSection } from './ApplicationRecordsSection';
 import { parsePDF } from '../parsers/pdfParser';
 import { parseDOCX } from '../parsers/docxParser';
+import { removeResumeVariant } from '../shared/resumes.ts';
 
 const OPTION_TABS = [
   'personal',
@@ -293,19 +294,30 @@ function App() {
     }));
   };
 
-  const removeResume = (id: string) => {
+  const removeResume = async (id: string) => {
     const removed = (profile.resumes || []).find(resume => resume.id === id);
     if (!removed || !window.confirm(`确认删除“${removed.category || '未分类'}｜${removed.fileName}”吗？`)) return;
-    setProfile(current => {
-      const resumes = (current.resumes || []).filter(resume => resume.id !== id);
-      const legacyWasRemoved = current.resume?.fileData === removed.fileData
-        && current.resume?.fileName === removed.fileName;
-      return {
-        ...current,
-        resumes,
-        resume: legacyWasRemoved ? resumes[0] : current.resume,
-      };
-    });
+    const nextProfile = removeResumeVariant(profile, id);
+    setProfile(nextProfile);
+    setSaving(true);
+    try {
+      const response = await MessageService.sendMessage({
+        type: 'SAVE_USER_PROFILE',
+        payload: nextProfile,
+      });
+      if (response.success) {
+        setSaveNotice({ type: 'success', text: '简历已删除并保存' });
+      } else {
+        setSaveNotice({ type: 'error', text: `删除保存失败：${response.error || '未知错误'}` });
+        void loadProfile();
+      }
+    } catch (error) {
+      console.error('Remove resume error:', error);
+      setSaveNotice({ type: 'error', text: '删除保存失败，请重试' });
+      void loadProfile();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -820,7 +832,7 @@ function App() {
                 )}
 
                 <div className="info-note">
-                  每份简历会独立保存解析资料，切换简历时悬浮窗和自动填写内容会同步切换；新增简历不会覆盖已有资料。修改分类或删除简历后，请点击下方“保存设置”。
+                  每份简历会独立保存解析资料，切换简历时悬浮窗和自动填写内容会同步切换；新增简历不会覆盖已有资料。删除后会立即保存，修改分类后请点击下方“保存设置”。
                 </div>
               </div>
             </div>

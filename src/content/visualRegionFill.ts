@@ -574,6 +574,9 @@ function collectControlOptions(
   if (label.includes('学位') || name === 'academic_degree') {
     return ['无', '学士', '硕士', '博士'];
   }
+  if (label.includes('政治面貌') || label.includes('政治状态') || name === 'political_status') {
+    return ['中共党员', '中共预备党员', '共青团员', '群众', '民主党派', '无党派人士'];
+  }
 
   return [];
 }

@@ -8,6 +8,7 @@ import type {
   ResumeVariant,
   UserProfile,
 } from './types.ts';
+import { normalizePoliticalStatusValue } from './personal.ts';
 
 export const LEGACY_RESUME_ID = 'legacy-resume';
 
@@ -90,7 +91,12 @@ function mergeEducationWithFallback(
 
 function normalizeResumeProfileSnapshot(snapshot: ResumeProfileSnapshot): ResumeProfileSnapshot {
   return {
-    personal: { ...snapshot.personal },
+    personal: {
+      ...snapshot.personal,
+      ...(snapshot.personal.politicalStatus
+        ? { politicalStatus: normalizePoliticalStatusValue(snapshot.personal.politicalStatus) }
+        : {}),
+    },
     education: (snapshot.education || []).map(normalizeEducation),
     experience: (snapshot.experience || []).map(normalizeExperience),
     projects: (snapshot.projects || []).map(normalizeProject),
@@ -140,10 +146,39 @@ export function createResumeProfileSnapshot(parsed: ParsedResumeData): ResumePro
 }
 
 export function getResumeLibrary(profile: Pick<UserProfile, 'resume' | 'resumes'>): ResumeVariant[] {
-  if (profile.resumes?.length) return profile.resumes;
+  // 显式空数组表示用户已经删除全部简历，不能再从旧版 resume 字段复活。
+  if (profile.resumes !== undefined) return profile.resumes;
   return profile.resume?.fileData
     ? [{ ...profile.resume, id: LEGACY_RESUME_ID, category: '默认简历' }]
     : [];
+}
+
+/** 同一个原文件再次添加时更新原条目，避免重复出现两份完全相同的简历。 */
+export function upsertResumeVariant(
+  library: ResumeVariant[],
+  incoming: ResumeVariant,
+): ResumeVariant[] {
+  const existingIndex = library.findIndex(item => (
+    item.fileName === incoming.fileName && item.fileData === incoming.fileData
+  ));
+  if (existingIndex < 0) return [...library, incoming];
+
+  const next = [...library];
+  next[existingIndex] = { ...incoming, id: library[existingIndex].id };
+  return next;
+}
+
+export function removeResumeVariant(profile: UserProfile, id: string): UserProfile {
+  const removed = (profile.resumes || []).find(item => item.id === id);
+  if (!removed) return profile;
+  const resumes = (profile.resumes || []).filter(item => item.id !== id);
+  const legacyWasRemoved = profile.resume?.fileData === removed.fileData
+    && profile.resume?.fileName === removed.fileName;
+  return {
+    ...profile,
+    resumes,
+    resume: legacyWasRemoved ? resumes[0] : profile.resume,
+  };
 }
 
 export function resolveResumeSelection(

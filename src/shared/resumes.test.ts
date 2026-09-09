@@ -7,7 +7,9 @@ import {
   getResumeLibrary,
   LEGACY_RESUME_ID,
   normalizeResumeLibrary,
+  removeResumeVariant,
   resolveResumeSelection,
+  upsertResumeVariant,
 } from './resumes.ts';
 
 const legacyResume = {
@@ -22,6 +24,32 @@ test('旧版单简历自动迁移为默认分类且保留原文件名', () => {
   assert.equal(library[0]?.id, LEGACY_RESUME_ID);
   assert.equal(library[0]?.category, '默认简历');
   assert.equal(library[0]?.fileName, '产品经理-张三.pdf');
+});
+
+test('显式空简历库不会重新恢复旧版简历', () => {
+  assert.deepEqual(getResumeLibrary({ resume: legacyResume, resumes: [] }), []);
+});
+
+test('同一文件重复添加时更新原条目而不是追加副本', () => {
+  const oldResume = createResumeVariant(legacyResume, { id: 'old', category: '旧分类' });
+  const newResume = createResumeVariant(legacyResume, { id: 'new', category: '新分类' });
+  const result = upsertResumeVariant([oldResume], newResume);
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.id, 'old');
+  assert.equal(result[0]?.category, '新分类');
+});
+
+test('删除最后一份简历会清空兼容字段且不会复活', () => {
+  const resume = createResumeVariant(legacyResume, { id: 'only', category: '默认简历' });
+  const profile = {
+    personal: {}, education: [], experience: [], projects: [], customInformation: [], skills: [], certifications: [],
+    resume: legacyResume,
+    resumes: [resume],
+  } as any;
+  const removed = removeResumeVariant(profile, 'only');
+  assert.deepEqual(removed.resumes, []);
+  assert.equal(removed.resume, undefined);
+  assert.deepEqual(getResumeLibrary(removed), []);
 });
 
 test('本次可明确选择不上传或指定简历', () => {

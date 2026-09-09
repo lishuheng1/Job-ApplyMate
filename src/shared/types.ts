@@ -425,6 +425,7 @@ export enum FieldType {
   EMAIL = 'email',
   WECHAT = 'wechat',
   ID_CARD = 'idCard',
+  POLITICAL_STATUS = 'politicalStatus',
   SCHOOL = 'school',
   COLLEGE = 'college',
   EDUCATION_TYPE = 'educationType',
